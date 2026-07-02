@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0 OR AGPL-3.0-or-later
+# =============================================================================
+# PRODUCTION compose for the shared host (124.156.213.179).
+#
+# This is NOT the local full stack (docker-compose.yml). The prod host
+# already runs other people's apps + a manually-started `af-mysql`
+# container (host :33306) holding AF's real data, and host Redis on
+# :6379. So this file ONLY containerizes AF's own three pieces —
+# app + web + sidecar — and REUSES the existing MySQL/Redis. It must not
+# start its own mysql/redis (would collide with other projects' :3306 /
+# :6379 and ignore AF's existing data).
+#
+# Secrets come from ./.env (copied from /home/ubuntu/af/config/env at
+# deploy: DB_USER/DB_PASSWORD/DB_NAME + AUTH_*). Infra wiring (DB host/
+# port, redis) is set in `environment:` below so it overrides the env
+# file regardless of what the legacy config had.
+#
+# Validation ports: app 9095, web 9096 (both free on the host). At
+# cutover the host nginx (9091) is pointed at the web container (9096)
+# and the systemd af-backend/af-akshare-sidecar are stopped.
+# =============================================================================
+
+services:
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: af-backend:docker
+    container_name: afd-app
+    restart: unless-stopped
+    entrypoint: ["/app/af-backend", "-config", "/app/configs/config.docker.yaml"]
+    env_file:
+      - ./.env          # DB_USER / DB_PASSWORD / DB_NAME / AUTH_* (prod secrets)
+    environment:
+      # Reach the host-published services from inside the container:
+      # af-mysql is on host :33306, Redis on host :6379. host-gateway
+      # resolves to the Docker host.
+      DB_HOST: host.docker.internal
+      DB_PORT: "33306"
+      REDIS_HOST: host.docker.internal
+      REDIS_PORT: "6379"
+      APP_ENV: production
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:9095:8080"   # validation only; bound to localhost
+    depends_on:
+      sidecar:
+        condition: service_healthy
+    networks:
+      - afd-net
+
+  sidecar:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.sidecar
+    image: af-sidecar:docker
+    container_name: afd-sidecar
+    restart: unless-stopped
+    expose:
+      - "18800"               # internal only; app reaches it as sidecar:18800
+    networks:
+      - afd-net
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: af-frontend:docker
+    container_name: afd-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9096:80"   # host nginx (9091) proxies here at cutover
+    depends_on:
+      - app
+    networks:
+      - afd-net
+
+networks:
+  afd-net:
+    driver: bridge

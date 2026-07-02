@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# pre-commit hook for AF Selector.
+#
+# Runs lint + typecheck + format checks on staged files. Skips
+# checks that don't apply (e.g. a docs-only commit doesn't pay
+# the cost of a Go build).
+#
+# Install:
+#   make setup   (sets git core.hooksPath=.githooks)
+# or manually:
+#   git config core.hooksPath .githooks
+#
+# Bypass (use sparingly — CI will catch it):
+#   git commit --no-verify
+
+set -euo pipefail
+
+# Color only when stderr is a TTY (so the message is clean in CI logs).
+if [ -t 2 ]; then
+    RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[0;33m'; BOLD=$'\033[1m'; OFF=$'\033[0m'
+else
+    RED=""; GREEN=""; YELLOW=""; BOLD=""; OFF=""
+fi
+ok()   { echo "${GREEN}✓${OFF} $*"; }
+fail() { echo "${RED}✗${OFF} $*" 1>&2; }
+info() { echo "${BOLD}==>${OFF} $*"; }
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Collect staged files. Skip deletions (--diff-filter=ACMR excludes D).
+mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR)
+if [ ${#STAGED[@]} -eq 0 ]; then
+    ok "no staged files — nothing to check"
+    exit 0
+fi
+
+GO_FILES=()
+TS_FILES=()
+SH_FILES=()
+for f in "${STAGED[@]}"; do
+    case "$f" in
+        *.go)               GO_FILES+=("$f") ;;
+        frontend/src/*.{ts,tsx,js,jsx}) TS_FILES+=("$f") ;;
+        *.sh)               SH_FILES+=("$f") ;;
+        .devcontainer/post-create.sh) SH_FILES+=("$f") ;;
+    esac
+done
+
+FAILED=0
+
+# -------------------------------------------------------------------- Go
+if [ ${#GO_FILES[@]} -gt 0 ]; then
+    info "gofmt (${#GO_FILES[@]} files staged)"
+    UNFORMATTED=$(gofmt -l "${GO_FILES[@]}" 2>/dev/null || true)
+    if [ -n "$UNFORMATTED" ]; then
+        fail "gofmt: these files need formatting (run 'gofmt -w <file>'):"
+        echo "$UNFORMATTED" | sed 's/^/    /' 1>&2
+        FAILED=1
+    else
+        ok "gofmt clean"
+    fi
+
+    info "go vet (whole module — fast, catches obvious bugs)"
+    if (cd backend && go vet ./...); then
+        ok "go vet clean"
+    else
+        fail "go vet failed"
+        FAILED=1
+    fi
+
+    info "go build (whole module — catches type/compile errors)"
+    if (cd backend && CGO_ENABLED=0 go build ./...); then
+        ok "go build clean"
+    else
+        fail "go build failed"
+        FAILED=1
+    fi
+fi
+
+# -------------------------------------------------------------------- TS
+if [ ${#TS_FILES[@]} -gt 0 ]; then
+    info "tsc --noEmit (whole frontend)"
+    if (cd frontend && npm run typecheck >/dev/null 2>&1); then
+        ok "tsc clean"
+    else
+        fail "tsc failed — run 'cd frontend && npm run typecheck' to see the errors"
+        FAILED=1
+    fi
+
+    info "eslint (whole frontend)"
+    if (cd frontend && npm run lint >/dev/null 2>&1); then
+        ok "eslint clean"
+    else
+        fail "eslint failed — run 'cd frontend && npm run lint' to see the errors"
+        FAILED=1
+    fi
+fi
+
+# -------------------------------------------------------------------- Shell
+if [ ${#SH_FILES[@]} -gt 0 ]; then
+    info "shellcheck (${#SH_FILES[@]} shell scripts)"
+    if command -v shellcheck >/dev/null 2>&1; then
+        # -x follows source, -e stops on first error.
+        if shellcheck -x "${SH_FILES[@]}"; then
+            ok "shellcheck clean"
+        else
+            fail "shellcheck found issues"
+            FAILED=1
+        fi
+    else
+        echo "${YELLOW}!${OFF} shellcheck not installed — skipping (brew install shellcheck)"
+    fi
+fi
+
+# -------------------------------------------------------------------- Result
+echo ""
+if [ "$FAILED" -ne 0 ]; then
+    fail "pre-commit checks failed. Fix the issues above, or run with --no-verify to skip."
+    exit 1
+fi
+ok "all pre-commit checks passed"

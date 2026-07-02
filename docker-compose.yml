@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: Apache-2.0 OR AGPL-3.0-or-later
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: af-backend
+    restart: unless-stopped
+    # Override the image's default entrypoint so the backend uses the
+    # container config (akshare source → http://sidecar:18800 instead of
+    # 127.0.0.1, which inside a container is the container itself). DB /
+    # redis / auth still come from env below + .env.
+    entrypoint: ["/app/af-backend", "-config", "/app/configs/config.docker.yaml"]
+    env_file:
+      - .env
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      APP_ENV: production
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sidecar:
+        condition: service_healthy
+    networks:
+      - af-net
+
+  # akshare data sidecar — the Go backend's kline/quote/fundamental/
+  # universe/news source. config.docker.yaml points the akshare source at
+  # http://sidecar:18800 (this service). Needs outbound internet to reach
+  # sina/akshare upstreams.
+  sidecar:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.sidecar
+    container_name: af-sidecar
+    restart: unless-stopped
+    expose:
+      - "18800"
+    networks:
+      - af-net
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: af-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - app
+    networks:
+      - af-net
+
+  mysql:
+    image: mysql:8.0
+    container_name: af-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: astock_selector
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - af-net
+
+  redis:
+    image: redis:7
+    container_name: af-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - af-net
+
+  # PostgreSQL — opt-in alternative to mysql. Gated behind the "pg"
+  # profile so the default `docker compose up` (mysql stack) never
+  # starts it, and the two DBs never fight over being the app's
+  # backend. To use it locally:
+  #   docker compose --profile pg up -d postgres redis   (or: make dev-up-pg)
+  #   DB_DRIVER=postgres DB_HOST=127.0.0.1 DB_PORT=5432 \
+  #     DB_USER=af DB_PASSWORD=afpass DB_NAME=astock_selector \
+  #     make run-backend
+  postgres:
+    image: postgres:16
+    container_name: af-postgres
+    restart: unless-stopped
+    profiles: ["pg"]
+    environment:
+      POSTGRES_USER: af
+      POSTGRES_PASSWORD: afpass
+      POSTGRES_DB: astock_selector
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U af -d astock_selector"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - af-net
+
+volumes:
+  mysql_data:
+  redis_data:
+  pg_data:
+
+networks:
+  af-net:
+    driver: bridge

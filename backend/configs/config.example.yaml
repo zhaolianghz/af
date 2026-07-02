@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: Apache-2.0 OR AGPL-3.0-or-later
+# =============================================================================
+# A-Stock Selector System - Default Configuration
+# Copy to `config.yaml` and override with environment variables (see .env.example).
+# =============================================================================
+
+app:
+  name: af-backend
+  env: development
+  version: "0.1.0"
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  shutdown_timeout: 15s
+  api_base_path: /api/v1
+
+db:
+  # Supported drivers:
+  #   mysql    — production (uses host/port/user/password/name below)
+  #   postgres — production (aliases: pgsql, pg). Uses host/port/user/
+  #              password/name + sslmode below. Default port 5432.
+  #   sqlite   — tests, local dev (uses `name` as the SQLite DSN, e.g.
+  #              ":memory:" or "file::memory:?cache=shared" or "/tmp/af.db")
+  #   none     — DB-less mode (healthz will not report db)
+  driver: mysql
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: root
+  name: astock_selector
+  charset: utf8mb4          # mysql only
+  sslmode: disable          # postgres only: disable|require|verify-ca|verify-full
+  parse_time: true
+  loc: Local
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 1h
+  log_level: info
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 20
+  min_idle_conns: 5
+
+datasource:
+  provider: akshare            # akshare | tushare | baostock (legacy)
+  token: ""                    # required for tushare
+  timeout: 10s
+  retry: 3
+  cache_ttl: 5m
+  rate_limit: 60               # requests per minute
+  # A3 multi-source adapter chain. The first source is treated
+  # as primary; later sources are fallbacks. Disable a source
+  # by setting enabled: false.
+  sources:
+    - name: eastmoney          # 东方财富 (主源)
+      enabled: true
+      base_url: ""             # empty = use package default
+      timeout: 5s
+    - name: sina               # 新浪 (备源 1)
+      enabled: true
+      base_url: ""
+      timeout: 5s
+    - name: akshare            # akshare sidecar (备源 2)
+      enabled: true
+      base_url: http://127.0.0.1:18800
+      timeout: 5s
+  # Per-source circuit breaker (design.md §3.5).
+  fail_threshold: 5            # 5min 内失败次数阈值
+  fail_window: 5m
+  cooldown: 10m                # 熔断持续时间
+  # Cross-source price-consistency check.
+  consistency_threshold: 0.005 # 0.5% — 偏差超过此值记告警
+
+notify:
+  channels: [email, wechat, feishu]
+  default_channel: email
+  email:
+    smtp_host: smtp.example.com
+    smtp_port: 465
+    username: noreply@example.com
+    password: ""
+    from: noreply@example.com
+  wechat:
+    corpid: ""
+    agentid: ""
+    corpsecret: ""
+  feishu:
+    webhook: ""
+  # A4 multi-channel notification (webhook-based). At least one of
+  # feishu/dingtalk/wecom must be enabled (enabled: true) and have a
+  # webhook_url for the system to deliver notifications. Primary is
+  # tried first; fallbacks are tried in order on failure.
+  channel:
+    primary: feishu
+    fallback: [dingtalk, wecom]
+    retry_attempts: 3
+    feishu:
+      enabled: false
+      webhook_url: ""
+      secret: ""                 # 加签密钥 (optional)
+      timeout: 5s
+    dingtalk:
+      enabled: false
+      webhook_url: ""
+      secret: ""                 # 加签密钥 (optional)
+      timeout: 5s
+    wecom:
+      enabled: false
+      webhook_url: ""
+      timeout: 5s
+    circuit_breaker:
+      failure_threshold: 5       # 5 分钟内失败次数阈值
+      window: 5m
+      cooldown: 10m              # 熔断持续时间
+
+cron:
+  enabled: true
+  timezone: Asia/Shanghai
+  daily_selection: "0 15 * * 1-5"   # 15:00 Mon-Fri (A-share close)
+
+# §9 Post-hoc performance engine: T+1 / T+3 / T+5 returns,
+# drawdown, win-rate + group-by aggregations over the latest
+# snapshot per recommendation. Routes are mounted under
+# /api/v1/perf/* (GET /recommendations/:id, /history, POST
+# /calculate, GET /aggregations). The end-of-day backfill cron
+# is wired in §9.7 — until then the operator path is
+# `POST /api/v1/perf/calculate` with a {from, to} body.
+perf:
+  enabled: true
+  backfill_cron: "30 15 * * 1-5"   # 15:30 Mon-Fri, just after A-share close
+  kline_lookback: 168h             # how far back to scan when fetching K-line
+  kline_timeout: 5s                # per-day K-line fetch ceiling
+  kline_future_pad: 24h            # upper bound pad so "today" is reachable
+  startup_backfill_timeout: 5m     # ceiling on the §9.5 startup goroutine; raise when KlineLookback × N recs is large
+
+log:
+  level: info
+  encoding: console                # console | json
+  output: stdout                   # stdout | file
+  file_path: ""

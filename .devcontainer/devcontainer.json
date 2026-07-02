@@ -1,0 +1,55 @@
+{
+  "name": "AF Selector Dev",
+  "dockerFile": "Dockerfile",
+  "context": "..",
+
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "forwardPorts": [8080, 5173, 33306, 6379, 9090, 9091],
+
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/af,type=bind,consistency=cached",
+  "workspaceFolder": "/workspaces/af",
+
+  "containerUser": "root",
+  "remoteUser": "root",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "go.useLanguageServer": true,
+        "go.testFlags": ["-race", "-count=1"],
+        "go.lintTool": "go vet",
+        "editor.formatOnSave": true,
+        "editor.tabSize": 2,
+        "[go]": {
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "[typescript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[typescriptreact]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "terminal.integrated.fontSize": 13
+      },
+      "extensions": [
+        "golang.go",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "ms-playwright.playwright",
+        "tamasfe.even-better-toml"
+      ]
+    }
+  },
+
+  "updateContentCommand": "make tidy",
+  "initializeCommand": "git config --global --add safe.directory /workspaces/af"
+}

@@ -1,0 +1,9 @@
+{
+  "code": "dragon_tiger_institutional",
+  "name": "龙虎榜机构席位",
+  "description": "近 1-2 个交易日龙虎榜机构席位净买入, 跟随主力建仓",
+  "industry": "通用",
+  "built_in": true,
+  "ai_explanation": "跟随龙虎榜机构席位动向。机构席位净买入往往代表中长期资金建仓。注意: v1 暂用新闻标题近似, 字段精度有限; 真实机构净买入需接入 akshare 龙虎榜数据接口。",
+  "dag_json": "{\"nodes\":[{\"id\":\"ds_news\",\"type\":\"data_source\",\"position\":{\"x\":0,\"y\":0},\"data\":{\"subtype\":\"news\",\"params\":{\"subtype\":\"news\",\"stock_codes\":[\"600519.SH\",\"000858.SZ\",\"601318.SH\"],\"news_limit\":20}}},{\"id\":\"filt_dt\",\"type\":\"filter\",\"position\":{\"x\":240,\"y\":0},\"data\":{\"subtype\":\"\",\"params\":{\"field\":\"title\",\"op\":\"contains\",\"value\":\"龙虎榜\"}}},{\"id\":\"dedupe\",\"type\":\"dedupe\",\"position\":{\"x\":480,\"y\":0},\"data\":{\"subtype\":\"\",\"params\":{\"key\":\"stock_code\"}}},{\"id\":\"session\",\"type\":\"session_tag\",\"position\":{\"x\":480,\"y\":120},\"data\":{\"subtype\":\"\",\"params\":{}}},{\"id\":\"persist\",\"type\":\"persist\",\"position\":{\"x\":720,\"y\":0},\"data\":{\"subtype\":\"\",\"params\":{\"extra_tags\":[\"dragon_tiger_institutional\"]}}},{\"id\":\"notify\",\"type\":\"notify\",\"position\":{\"x\":960,\"y\":0},\"data\":{\"subtype\":\"\",\"params\":{\"channel_type\":\"review\"}}}],\"edges\":[{\"id\":\"e1\",\"source\":\"ds_news\",\"target\":\"filt_dt\"},{\"id\":\"e2\",\"source\":\"filt_dt\",\"target\":\"dedupe\"},{\"id\":\"e3\",\"source\":\"dedupe\",\"target\":\"persist\"},{\"id\":\"e4\",\"source\":\"session\",\"target\":\"persist\"},{\"id\":\"e5\",\"source\":\"persist\",\"target\":\"notify\"}]}"
+}

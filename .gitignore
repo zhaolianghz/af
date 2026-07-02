@@ -1,0 +1,105 @@
+# --- OS ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
+*~
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.project
+.classpath
+.settings/
+nbproject/private/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+# --- Go ---
+# Binaries
+/bin/
+/backend/bin/
+*.exe
+*.exe~
+*.dll
+*.dylib
+*.so
+*.so.*
+*.test
+*.out
+*.cover
+*.coverprofile
+
+# Go workspace
+go.work
+go.work.sum
+
+# Test artifacts
+coverage.txt
+junit.xml
+
+# Dependency directories (vendored or cached)
+/backend/vendor/
+
+# --- Node / Frontend ---
+node_modules/
+/frontend/dist/
+/frontend/build/
+/frontend/.vite/
+/frontend/.cache/
+/frontend/.next/
+/frontend/.nuxt/
+/frontend/.svelte-kit/
+/frontend/.parcel-cache/
+/frontend/.turbo/
+/frontend/.eslintcache
+/frontend/.stylelintcache
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment files (NEVER commit real secrets)
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+!.env.example
+
+# --- Project specific ---
+# Runtime data
+.runtime/
+data/
+storage/
+*.sqlite
+*.sqlite3
+*.db
+
+# Build outputs
+/dist/
+/build/
+/tmp/
+
+# Docker
+docker-compose.override.yml
+
+# Local runtime config (holds secrets: DB password, LLM key, JWT secret).
+# The tracked template is backend/configs/config.example.yaml.
+backend/configs/config.yaml
+
+# Python sidecar bytecode
+__pycache__/
+*.pyc

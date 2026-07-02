@@ -1,0 +1,42 @@
+<!-- SPDX-License-Identifier: Apache-2.0 OR AGPL-3.0-or-later -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AF Selector — API Docs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css" />
+  <style>
+    body { margin: 0; padding: 0; }
+    .topbar { display: none; } /* hide the default swagger top bar */
+    .information-container { background: #fafafa; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: "/api/v1/openapi.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        // Tag every browser-originated request with a UUID so it
+        // shows up in the server's zap logs alongside the response.
+        // AF v0.1 has no auth; placeholder for future.
+        requestInterceptor: (req) => {
+          const rid = (crypto.randomUUID && crypto.randomUUID()) || Math.random().toString(36).slice(2);
+          req.headers['X-Request-ID'] = rid;
+          return req;
+        }
+      });
+    };
+  </script>
+</body>
+</html>

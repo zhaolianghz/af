@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+# SPDX-License-Identifier: Apache-2.0 OR AGPL-3.0-or-later
+#
+# akshare data sidecar — the Python HTTP bridge the Go backend calls for
+# kline / quote / fundamental / universe / news. Speaks the small custom
+# contract documented in akshare-sidecar.py. Backed by sina (eastmoney's
+# push endpoints are blocked from some cloud IPs).
+#
+# Build context is the scripts/ directory:
+#   docker build -f scripts/Dockerfile.sidecar -t af-sidecar scripts/
+# (docker-compose wires this automatically.)
+FROM python:3.12-slim
+
+# tzdata so CST timestamps (akshare feeds + news RFC3339 conversion) are
+# correct; build-essential is NOT needed — akshare's wheels are prebuilt.
+ENV TZ=Asia/Shanghai \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    AKSHARE_SIDECAR_PORT=18800
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# akshare pulls in pandas/requests/etc. Pin akshare; let it resolve its
+# own deps. This layer is cached unless the pin changes.
+RUN pip install "akshare>=1.18,<2.0"
+
+COPY akshare-sidecar.py /app/akshare-sidecar.py
+
+EXPOSE 18800
+
+# Lightweight liveness probe hitting the sidecar's own /health.
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
+    CMD curl -fsS "http://127.0.0.1:${AKSHARE_SIDECAR_PORT}/health" || exit 1
+
+ENTRYPOINT ["python", "/app/akshare-sidecar.py"]
