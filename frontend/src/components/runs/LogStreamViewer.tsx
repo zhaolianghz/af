@@ -58,6 +58,10 @@ export default function LogStreamViewer({
           return;
         }
         if (parsed.run_id !== runId) return;
+        // Control frames (the "ready" handshake, heartbeats) carry a
+        // run_id but no type/ts — rendering them shows "Invalid Date"
+        // and inflates the event count. Only buffer real run events.
+        if (!parsed.type || !parsed.ts) return;
         setEvents((prev) => {
           const next = [...prev, { ...parsed!, receivedAt: Date.now() }];
           // Cap at 2000 events to keep the DOM light.
