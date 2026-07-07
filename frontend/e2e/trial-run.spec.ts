@@ -45,11 +45,13 @@ test('trial-run surfaces a failed banner on backend error', async ({ page }) => 
   await mockApi(page, {
     'GET /strategies/12': strategyDetailFixture(STRATEGY_ID),
     'POST /strategies/12/trial-run': envelope({
-      summary: {
-        status: 'failed',
-        error: 'DAG contains a cycle',
-        node_results: [],
-      },
+      run_id: 0,
+      strategy_id: 12,
+      status: 'failed',
+      dry_run: true,
+      duration: 1_000_000,
+      error: 'DAG contains a cycle',
+      node_results: {},
     }),
   });
 

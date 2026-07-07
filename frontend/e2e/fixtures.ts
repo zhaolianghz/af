@@ -121,17 +121,21 @@ export function strategyDetailFixture(id = 42) {
   });
 }
 
+// Mirrors the backend's FLAT RunSummary (trial_handler.go → httpresp.OK):
+// no `summary` wrapper, `node_results` keyed by node id, `duration` in
+// nanoseconds. The frontend's adaptTrialRun() bridges this to the UI shape.
 export const trialRunSuccessFixture = envelope({
-  summary: {
-    status: 'success' as const,
-    started_at: '2026-06-16T10:00:00Z',
-    finished_at: '2026-06-16T10:00:01Z',
-    duration_ms: 42,
-    node_results: [
-      { node_id: 'ds1', status: 'success' as const, duration_ms: 10 },
-      { node_id: 'f1', status: 'success' as const, duration_ms: 5 },
-      { node_id: 'p1', status: 'success' as const, duration_ms: 2 },
-    ],
+  run_id: 0,
+  strategy_id: 11,
+  status: 'success' as const,
+  dry_run: true,
+  started_at: '2026-06-16T10:00:00Z',
+  finished_at: '2026-06-16T10:00:01Z',
+  duration: 42_000_000, // 42ms in ns
+  node_results: {
+    ds1: { node_id: 'ds1', status: 'success' as const, duration: 10_000_000 },
+    f1: { node_id: 'f1', status: 'success' as const, duration: 5_000_000 },
+    p1: { node_id: 'p1', status: 'success' as const, duration: 2_000_000 },
   },
 });
 

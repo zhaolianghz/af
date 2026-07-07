@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "description": "A-Stock Selector System - Frontend (React 18 + TypeScript + Vite + Tailwind + ECharts + ReactFlow)",
   "scripts": {
     "dev": "vite",
