@@ -52,9 +52,20 @@ export async function getDashboard(windowDays = 7): Promise<DashboardSummary> {
 export async function getAggregations(
   groupBy: 'strategy' | 'session_tag' | 'stock' = 'strategy',
 ): Promise<AggregationsResponse> {
-  const { data } = await apiClient.get<{ code: number; data: AggregationsResponse }>(
+  const { data, status } = await apiClient.get<{ code: number; data: AggregationsResponse }>(
     '/perf/aggregations',
-    { params: { group_by: groupBy } },
+    {
+      params: { group_by: groupBy },
+      // The perf engine is optional (perf.enabled=false in sqlite dev):
+      // its routes are then simply not mounted and the call 404s. That
+      // is an expected deployment shape, not an error — accepting 404
+      // here keeps the axios error interceptor (and its console.error)
+      // out of every dashboard load on a perf-less install.
+      validateStatus: (s) => s === 200 || s === 404,
+    },
   );
+  if (status === 404) {
+    return { group_by: groupBy, total: 0, items: [] };
+  }
   return data.data;
 }
