@@ -56,6 +56,13 @@ func (h *TrialRunHandler) TrialRun(c *gin.Context) {
 
 	summary, err := h.runTrial(c, id, body.Inputs, "")
 	if err != nil {
+		// A node-level failure still produces a summary — for a dry
+		// run the summary IS the result (per-node status + error), so
+		// return it with 200 instead of a 500 that hides the detail.
+		if summary != nil {
+			httpresp.OK(c, summary)
+			return
+		}
 		httpresp.Err(c,err)
 		return
 	}
@@ -81,6 +88,11 @@ func (h *TrialRunHandler) TrialRunToNode(c *gin.Context) {
 
 	summary, err := h.runTrial(c, id, body.Inputs, target)
 	if err != nil {
+		// Same node-failure rule as TrialRun above.
+		if summary != nil {
+			httpresp.OK(c, summary)
+			return
+		}
 		httpresp.Err(c,err)
 		return
 	}
