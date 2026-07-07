@@ -22,6 +22,20 @@
 
 ## datasource
 
+- [ ] **P2 — eastmoney push2his K-line endpoint unreachable (EOF), local + prod.**
+  Found by /qa on main, 2026-07-07. `GetKLine` against
+  `push2his.eastmoney.com` dies with `http do: ... EOF` (anti-bot / IP
+  block — same class as the已知 "quote/push endpoints blocked from prod
+  IP" note below). sina/akshare fallbacks don't serve K-line in this
+  setup either, so any DAG with an `indicator` node fails at `ind_vr`
+  with "no kline series found in input". Payload-shape bug in the same
+  path (klines array-vs-string) was fixed by /qa (ISSUE-002,
+  a1bff63) — this remaining item is transport-level. Options: browser
+  UA + cookie warm-up on the eastmoney client, akshare sidecar `/kline`
+  endpoint, or a K-line cache seeding job.
+  - **Repro:** trial-run strategy #1 (from template 午后量能放大) →
+    `ds_kline` succeeds with 0 series, `ind_vr` fails.
+
 - [x] **P2 — Real news source for the sidecar.** Shipped in
   `af-v1.3.2`. The akshare sidecar `/news` now serves per-stock news via
   `akshare.stock_news_em` (eastmoney's news endpoint IS reachable from
