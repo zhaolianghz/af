@@ -152,7 +152,12 @@ func TestEastmoneyGetKLine(t *testing.T) {
 			"data": map[string]interface{}{
 				"code": "600519",
 				"name": "贵州茅台",
-				"klines": "2025-06-09,1810,1820,1825,1809,12345,22500\n2025-06-10,1820,1830,1835,1819,13579,24242",
+				// Real push2his shape: klines is an ARRAY of CSV rows
+				// (ISSUE-002 — was wrongly fixtured as a "\n"-joined string).
+				"klines": []string{
+					"2025-06-09,1810,1820,1825,1809,12345,22500",
+					"2025-06-10,1820,1830,1835,1819,13579,24242",
+				},
 			},
 		})
 	})
@@ -179,7 +184,7 @@ func TestEastmoneyGetKLineEmpty(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/qt/stock/kline/get", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"klines": ""}})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{"klines": []string{}}})
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

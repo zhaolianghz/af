@@ -182,11 +182,11 @@ func (s *Source) GetKLine(ctx context.Context, stockCode, period string, start, 
 	if err := s.getJSON(ctx, endpoint, &payload); err != nil {
 		return nil, fmt.Errorf("eastmoney: GetKLine: %w", err)
 	}
-	if payload.Data == nil || payload.Data.KLines == "" {
+	if payload.Data == nil || len(payload.Data.KLines) == 0 {
 		return nil, datasource.ErrNotImplemented
 	}
 	out := make([]datasource.KLine, 0, 32)
-	for _, line := range strings.Split(payload.Data.KLines, "\n") {
+	for _, line := range payload.Data.KLines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -333,9 +333,14 @@ func (b bidAskGroup) toBidAsks() []datasource.BidAsk {
 }
 
 type klinePayload struct {
-	Code   string `json:"code"`
-	Name   string `json:"name"`
-	KLines string `json:"klines"`
+	Code string `json:"code"`
+	Name string `json:"name"`
+	// The real push2his API returns klines as an ARRAY of CSV
+	// strings (["2026-06-09,1810,...", ...]). It was previously
+	// declared `string`, which made every live decode fail with
+	// "cannot unmarshal array into Go struct field ... of type
+	// string" — the primary source could never serve a K-line.
+	KLines []string `json:"klines"`
 }
 
 type fundamentalPayload struct {
