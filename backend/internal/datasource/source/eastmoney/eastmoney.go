@@ -28,6 +28,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/skyzhao/af/internal/datasource"
@@ -60,6 +61,14 @@ type Source struct {
 	http    *http.Client
 	ua      string
 	healthy bool
+
+	// warmOnce guards the lazy cookie warm-up. push2his checks for a
+	// session cookie the way a browser sends one; without it the
+	// endpoint drops the connection (EOF). We warm cookies by fetching
+	// the kline host root once after a successful main request — the
+	// Set-Cookie headers there are replayed on subsequent calls.
+	warmOnce sync.Once
+	cookies  []*http.Cookie
 }
 
 // New builds an eastmoney Source.
@@ -77,7 +86,14 @@ func New(opts Options) *Source {
 		opts.HTTPClient = &http.Client{Timeout: opts.Timeout}
 	}
 	if opts.UserAgent == "" {
-		opts.UserAgent = "af-backend/0.1 (+eastmoney-adapter)"
+		// A generic "af-backend/0.1 (+eastmoney-adapter)" UA is exactly
+		// the fingerprint push2his flag as a bot — the endpoint closes
+		// the connection (http do: EOF) before the request is served.
+		// Use a real browser UA string so the K-line endpoint stops
+		// treating us as a scraper. (Confirmed with /qa — the news
+		// endpoint stock_news_em is reachable from prod IP, so it is
+		// not a subnet block but endpoint-level bot detection.)
+		opts.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 	}
 	return &Source{
 		base:    strings.TrimRight(opts.BaseURL, "/"),
@@ -275,12 +291,29 @@ func (s *Source) getJSON(ctx context.Context, endpoint string, out interface{}) 
 	req.Header.Set("User-Agent", s.ua)
 	req.Header.Set("Accept", "application/json,text/plain,*/*")
 	req.Header.Set("Referer", "https://quote.eastmoney.com/")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Connection", "keep-alive")
+	for _, c := range s.cookies {
+		req.AddCookie(c)
+	}
 
 	resp, err := s.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("http do: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Lazy cookie warm-up: after the first successful response, fetch
+	// the kline host root to seed the cookie jar. Best-effort — a
+	// failure here does not fail the caller's request.
+	s.warmOnce.Do(func() {
+		if len(resp.Cookies()) == 0 {
+			s.warmCookies(ctx)
+			return
+		}
+		s.cookies = append(s.cookies, resp.Cookies()...)
+	})
+
 	if resp.StatusCode/100 != 2 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
@@ -289,6 +322,26 @@ func (s *Source) getJSON(ctx context.Context, endpoint string, out interface{}) 
 		return fmt.Errorf("decode json: %w", err)
 	}
 	return nil
+}
+
+// warmCookies is a best-effort probe of the kline host root to harvest
+// the session cookies browsers send with their requests. Called once
+// from getJSON; failures are ignored because the main request already
+// succeeded without them.
+func (s *Source) warmCookies(ctx context.Context) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.kline+"/", nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", s.ua)
+	req.Header.Set("Referer", "https://quote.eastmoney.com/")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	resp, err := s.http.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	s.cookies = append(s.cookies, resp.Cookies()...)
 }
 
 // =============================================================================

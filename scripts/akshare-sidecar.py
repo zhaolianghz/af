@@ -74,6 +74,69 @@ def to_sina_symbol(code: str) -> str:
     return ""
 
 
+def _rows_from_df(df):
+    """Normalize a daily kline DataFrame into the /kline JSON row shape.
+    akshare returns either English columns (sina) or Chinese columns
+    (tencent's stock_zh_a_hist_tx: 日期/开盘/收盘/最高/最低/成交量/成交额).
+    We sniff on the presence of 'date' (English) vs '日期' (Chinese)."""
+    out = []
+    date_c = "date" if "date" in df.columns else ("日期" if "日期" in df.columns else None)
+    if date_c is None:
+        return out
+    open_c = "open" if "open" in df.columns else "开盘"
+    high_c = "high" if "high" in df.columns else "最高"
+    low_c = "low" if "low" in df.columns else "最低"
+    close_c = "close" if "close" in df.columns else "收盘"
+    vol_c = "volume" if "volume" in df.columns else "成交量"
+    amt_c = "amount" if "amount" in df.columns else "成交额"
+    def g(row, c):
+        v = row[c]
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+    for _, r in df.iterrows():
+        day = str(r[date_c])[:10]
+        out.append({
+            "day": day,
+            "open": g(r, open_c),
+            "high": g(r, high_c),
+            "low": g(r, low_c),
+            "close": g(r, close_c),
+            "volume": int(g(r, vol_c)),
+            "amount": g(r, amt_c),
+        })
+    return out
+
+
+def fetch_klines_tx(code: str, start: str, end: str):
+    """Tencent daily kline via akshare.stock_zh_a_hist_tx — a fully
+    independent upstream from sina (whose stock_zh_a_daily feeds
+    fetch_klines) and from eastmoney's push2his. Returns normalized rows
+    or [] if the symbol/period can't be served."""
+    sym = to_sina_symbol(code)
+    if not sym:
+        return []
+    s = (start or "").replace("-", "") or "20200101"
+    e = (end or "").replace("-", "") or "20990101"
+    # akshare may not ship this function in older/newer builds; degrade
+    # gracefully so an absent tencent source never breaks /kline.
+    if not hasattr(ak, "stock_zh_a_hist_tx"):
+        return []
+    import time as _t
+    last = None
+    for attempt in range(3):
+        try:
+            df = ak.stock_zh_a_hist_tx(symbol=sym, start_date=s, end_date=e, adjust="qfq")
+            if df is None or len(df) == 0:
+                return []
+            return _rows_from_df(df)
+        except Exception as ex:  # noqa: BLE001 — surface after retries
+            last = ex
+            _t.sleep(0.6 * (attempt + 1))
+    raise last if last else RuntimeError("tencent kline fetch failed")
+
+
 def fetch_klines(code: str, start: str, end: str):
     sym = to_sina_symbol(code)
     if not sym:
@@ -88,23 +151,14 @@ def fetch_klines(code: str, start: str, end: str):
     for attempt in range(3):
         try:
             df = ak.stock_zh_a_daily(symbol=sym, start_date=s, end_date=e, adjust="qfq")
-            out = []
-            for _, r in df.iterrows():
-                day = str(r["date"])[:10]
-                out.append({
-                    "day": day,
-                    "open": float(r["open"]),
-                    "high": float(r["high"]),
-                    "low": float(r["low"]),
-                    "close": float(r["close"]),
-                    "volume": int(r["volume"]),
-                    "amount": float(r["amount"]),
-                })
-            return out
+            return _rows_from_df(df)
         except Exception as ex:  # noqa: BLE001 — surface after retries
             last = ex
             _t.sleep(0.6 * (attempt + 1))
-    raise last if last else RuntimeError("kline fetch failed")
+    # Sina exhausted; fall through to tencent as a second, independent
+    # upstream before giving up on this stock. This mirrors the Go-side
+    # source chain: one adapter, but two real upstreams.
+    return fetch_klines_tx(code, start, end)
 
 
 def _digits(code: str) -> str:
