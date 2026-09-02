@@ -202,10 +202,12 @@ func TestIndicator_VolumeRatio(t *testing.T) {
 func TestIndicator_TurnoverRate(t *testing.T) {
 	n := NewIndicatorNode()
 	in := indicatorIn(t, klines(20), indicatorParams{Subtype: "turnover_rate"})
-	out, err := n.Run(context.Background(), newFilterRC(), in)
-	require.NoError(t, err)
-	row := out["items"].([]any)[0].(map[string]any)
-	require.Contains(t, row, "turnover_rate")
+	// turnover_rate must FAIL LOUDLY (float shares not wired) instead
+	// of silently emitting a constant fake 0 that corrupts filters.
+	_, err := n.Run(context.Background(), newFilterRC(), in)
+	require.Error(t, err)
+	var paramErr *orchestrator.ParamError
+	require.ErrorAs(t, err, &paramErr)
 }
 
 // =============================================================================

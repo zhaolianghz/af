@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -42,6 +43,9 @@ type ServerConfig struct {
 	WriteTimeout    time.Duration `mapstructure:"write_timeout"`
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
 	APIBasePath     string        `mapstructure:"api_base_path"`
+	// CORSAllowedOrigins overrides the built-in localhost dev origins
+	// for the CORS middleware. Empty → localhost defaults (dev).
+	CORSOrigins []string `mapstructure:"cors_origins"`
 }
 
 type DBConfig struct {
@@ -468,6 +472,24 @@ func NewLoader(configPath, envFile string) (*Loader, error) {
 	return &Loader{v: v}, nil
 }
 
+// corsOriginsFromEnv reads the comma-separated SERVER_CORS_ORIGINS env var.
+// Viper's generic slice casting splits on whitespace only, so this binding
+// is applied manually after Unmarshal.
+func corsOriginsFromEnv() []string {
+	raw := strings.TrimSpace(os.Getenv("SERVER_CORS_ORIGINS"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func bindEnv(v *viper.Viper) {
 	envBindings := map[string]string{
 		"APP_ENV":                             "app.env",
@@ -584,6 +606,9 @@ func (l *Loader) Load() (*Config, error) {
 	if err := l.v.Unmarshal(&c); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	if origins := corsOriginsFromEnv(); origins != nil {
+		c.Server.CORSOrigins = origins
+	}
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -603,6 +628,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Log.Encoding == "" {
 		c.Log.Encoding = "console"
+	}
+	// §12/audit #4: refuse to boot a production deployment with auth
+	// off — every write endpoint would be unauthenticated.
+	if strings.EqualFold(c.App.Env, "production") && !c.Auth.Enabled {
+		return fmt.Errorf("auth.enabled=false 不允许在 app.env=production 下启动：所有写接口将无认证暴露；请设置 AUTH_ENABLED=true")
 	}
 	return nil
 }

@@ -21,8 +21,8 @@ import (
 //   "macd"           — MACD line / signal / histogram
 //   "kdj"            — stochastic KDJ
 //   "boll"           — Bollinger Bands
-//   "volume_ratio"   — volume / n-bar avg
-//   "turnover_rate"  — volume / float shares
+//   "volume_ratio"   — volume / avg(prev n volumes)
+//   "turnover_rate"  — REJECTED at run time (float shares not wired; see Run)
 type IndicatorNode struct{}
 
 // NewIndicatorNode returns a fresh instance.
@@ -81,9 +81,16 @@ func (n *IndicatorNode) Run(ctx context.Context, rc *orchestrator.RunContext, in
 		return nil, orchestrator.NewParamError("indicator", "klines", "no kline series found in input")
 	}
 	if p.Subtype != "ma" && p.Subtype != "ema" && p.Subtype != "macd" &&
-		p.Subtype != "kdj" && p.Subtype != "boll" &&
-		p.Subtype != "volume_ratio" && p.Subtype != "turnover_rate" {
+		p.Subtype != "kdj" && p.Subtype != "boll" && p.Subtype != "volume_ratio" {
 		return nil, orchestrator.NewParamError("indicator", "subtype", "unknown: "+p.Subtype)
+	}
+	if p.Subtype == "turnover_rate" {
+		// Deliberately LOUD: float-shares data is not wired yet, so
+		// any value we could emit here would be a constant fake 0
+		// that silently corrupts turnover-based filters (every stock
+		// would match `turnover_rate < X`). Fail the node instead.
+		return nil, orchestrator.NewParamError("indicator", "subtype",
+			"turnover_rate 暂不可用：流通股本数据源未接入（此前恒输出 0，会污染筛选结果）；请改用 volume_ratio 或等待数据源接入")
 	}
 
 	// Group bars by stock so each stock's indicator is computed on
@@ -140,11 +147,6 @@ func (n *IndicatorNode) Run(ctx context.Context, rc *orchestrator.RunContext, in
 			row["boll_lower"] = lastFinite(lower)
 		case "volume_ratio":
 			row["volume_ratio"] = lastFinite(indicators.VolumeRatio(vols, p.Period))
-		case "turnover_rate":
-			// No float-shares series available yet; emit 0 so the
-			// row still carries the field for downstream filters.
-			shares := make([]float64, len(vols))
-			row["turnover_rate"] = lastFinite(indicators.TurnoverRate(vols, shares))
 		}
 		items = append(items, row)
 	}

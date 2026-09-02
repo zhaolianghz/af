@@ -38,6 +38,15 @@ func NewTrialRunHandler(svc *StrategyService, exec *Executor, reg *Registry, l *
 // router group. The group's prefix is the caller's
 // responsibility (router.Options wires /api/v1/strategies).
 func (h *TrialRunHandler) RegisterRoutes(r *gin.RouterGroup) {
+	h.RegisterReadRoutes(r)
+	h.RegisterWriteRoutes(r)
+}
+
+// RegisterReadRoutes is a no-op: trial-run has no read-only endpoints.
+func (h *TrialRunHandler) RegisterReadRoutes(_ *gin.RouterGroup) {}
+
+// RegisterWriteRoutes mounts the trial-run POST endpoints.
+func (h *TrialRunHandler) RegisterWriteRoutes(r *gin.RouterGroup) {
 	r.POST("/:id/trial-run", h.TrialRun)
 	r.POST("/:id/trial-run/node/:nodeId", h.TrialRunToNode)
 }

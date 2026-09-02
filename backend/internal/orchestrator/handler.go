@@ -41,9 +41,22 @@ func (h *StrategyHandler) SetScheduleReloader(r ScheduleReloader) {
 // router group. The group prefix is the responsibility of the
 // caller (router.Options wires /api/v1/strategies).
 func (h *StrategyHandler) RegisterRoutes(r *gin.RouterGroup) {
-	r.POST("", h.Create)
+	h.RegisterReadRoutes(r)
+	h.RegisterWriteRoutes(r)
+}
+
+// RegisterReadRoutes mounts read-only strategy endpoints (GET list,
+// GET detail).
+func (h *StrategyHandler) RegisterReadRoutes(r *gin.RouterGroup) {
 	r.GET("", h.List)
 	r.GET("/:id", h.Detail)
+}
+
+// RegisterWriteRoutes mounts mutating strategy endpoints (create,
+// update, delete, clone, export, import). When auth is enabled the
+// router applies RequireRole(admin|editor) before these handlers.
+func (h *StrategyHandler) RegisterWriteRoutes(r *gin.RouterGroup) {
+	r.POST("", h.Create)
 	r.PUT("/:id", h.Update)
 	r.DELETE("/:id", h.Delete)
 	r.POST("/:id/clone", h.Clone)

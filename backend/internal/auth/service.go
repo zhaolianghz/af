@@ -9,6 +9,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -65,7 +66,13 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 		return "", nil, apperr.Unauthorized("用户名或密码错误")
 	}
 
-	role := s.roleCode(ctx, u.RoleID)
+	role, err := s.roleCode(ctx, &u)
+	if err != nil {
+		// Fail-closed: a transient DB error must NEVER escalate the
+		// user to Admin (the old code did exactly that). Refuse login
+		// until roles can be resolved reliably.
+		return "", nil, apperr.Wrap(apperr.CodeInternal, "auth: resolve role", err)
+	}
 	token, err := s.issue(&u, role)
 	if err != nil {
 		return "", nil, apperr.Wrap(apperr.CodeInternal, "auth: sign token", err)
@@ -106,15 +113,35 @@ func (s *Service) Verify(token string) (*Claims, error) {
 	return &c, nil
 }
 
-func (s *Service) roleCode(ctx context.Context, roleID uint64) string {
-	if roleID == 0 {
-		return model.RoleCodeAdmin
+// roleCode resolves the user's role code.
+//
+// Fail-closed policy:
+//   - An explicit RoleID whose row is missing / unreadable → error.
+//   - RoleID == 0 (legacy bootstrap account without an assigned role)
+//     maps to Admin ONLY while it is the sole active user — i.e. the
+//     bootstrapped first admin. Any other zero-role account gets the
+//     least-privileged role instead of an implicit escalation.
+func (s *Service) roleCode(ctx context.Context, u *model.User) (string, error) {
+	if u.RoleID != 0 {
+		var r model.Role
+		err := s.db.WithContext(ctx).First(&r, u.RoleID).Error
+		if err != nil {
+			return "", fmt.Errorf("query role %d: %w", u.RoleID, err)
+		}
+		if r.Code == "" {
+			return "", fmt.Errorf("role %d has empty code", u.RoleID)
+		}
+		return r.Code, nil
 	}
-	var r model.Role
-	if s.db.WithContext(ctx).First(&r, roleID).Error == nil && r.Code != "" {
-		return r.Code
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&model.User{}).
+		Where("status = '' OR status = ?", "active").Count(&count).Error; err != nil {
+		return "", fmt.Errorf("count active users: %w", err)
 	}
-	return model.RoleCodeAdmin
+	if count <= 1 {
+		return model.RoleCodeAdmin, nil // sole bootstrap admin
+	}
+	return model.RoleCodeViewer, nil
 }
 
 // Bootstrap ensures an admin user exists. On first boot (no users) it

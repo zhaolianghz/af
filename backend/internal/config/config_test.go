@@ -43,6 +43,7 @@ func TestEnvOverridesDefaults(t *testing.T) {
 	t.Setenv("DB_HOST", "10.20.30.40")
 	t.Setenv("DB_PASSWORD", "secret")
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("AUTH_ENABLED", "true") // production requires auth (audit #4)
 	t.Setenv("DATASOURCE_PROVIDER", "tushare")
 	t.Setenv("DATASOURCE_TOKEN", "abc-123")
 	t.Setenv("REDIS_PASSWORD", "redis-pw")
@@ -67,6 +68,24 @@ func TestInvalidServerPortFails(t *testing.T) {
 	require.NoError(t, err)
 	_, err = l.Load()
 	assert.Error(t, err, "expected validation failure for out-of-range port")
+}
+
+// Audit #4: production + auth.enabled=false must refuse to start.
+func TestProductionRequiresAuth(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	os.Unsetenv("AUTH_ENABLED")
+	l, err := NewLoader("", "")
+	require.NoError(t, err)
+	_, err = l.Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auth.enabled")
+
+	// Dev stays allowed (backwards-compatible local default).
+	t.Setenv("APP_ENV", "development")
+	l2, lerr := NewLoader("", "")
+	require.NoError(t, lerr)
+	_, err = l2.Load()
+	assert.NoError(t, err)
 }
 
 func TestDSN(t *testing.T) {
@@ -115,6 +134,8 @@ func TestYAMLConfigFile(t *testing.T) {
 	yaml := []byte(`
 app:
   env: production
+auth:
+  enabled: true
 server:
   port: 7777
 db:

@@ -7,8 +7,10 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/skyzhao/af/internal/auth"
 	"github.com/skyzhao/af/internal/handler"
 	"github.com/skyzhao/af/internal/middleware"
+	"github.com/skyzhao/af/internal/model"
 	"github.com/skyzhao/af/internal/openapi"
 )
 
@@ -20,12 +22,23 @@ type RouteRegistrar interface {
 	RegisterRoutes(g *gin.RouterGroup)
 }
 
+// ReadWriteRouteSplitter is implemented by registrars that can separate
+// read-only (GET) from write (POST/PUT/DELETE) routes so the caller
+// can apply different middleware (e.g. role-based guards) to each side.
+type ReadWriteRouteSplitter interface {
+	RegisterReadRoutes(g *gin.RouterGroup)
+	RegisterWriteRoutes(g *gin.RouterGroup)
+}
+
 // Options configures the router.
 type Options struct {
 	APIBasePath string // e.g. "/api/v1"
 	Logger      *zap.Logger
 	Version     string
 	DB          *gorm.DB // optional; passed through to the health handler
+	// CORSAllowedOrigins overrides the default localhost dev origins.
+	// May be nil in dev; production should set real origins via config.
+	CORSAllowedOrigins []string
 	// NotifyTestHandler is the POST /api/v1/notify/test handler. May be
 	// nil; in that case the route is not registered.
 	NotifyTestHandler gin.HandlerFunc
@@ -91,7 +104,7 @@ func New(opts Options) *gin.Engine {
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Recovery(opts.Logger))
 	r.Use(middleware.Logger(opts.Logger))
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORS(opts.CORSAllowedOrigins))
 
 	// Health
 	var h *handler.Health
@@ -136,8 +149,22 @@ func New(opts Options) *gin.Engine {
 		// A4 notify routes. Both are optional — when the handler is
 		// nil the route is skipped. The notify package supplies the
 		// concrete handlers; we just wire them here.
+		// A4 notify test fires real webhooks — admin only (when auth
+		// is enabled). The role guard is a no-op risk when auth is off,
+		// so it's only mounted alongside the auth middleware.
 		if opts.NotifyTestHandler != nil {
-			api.POST("/notify/test", opts.NotifyTestHandler)
+			h := opts.NotifyTestHandler
+			if opts.AuthMiddleware != nil {
+				guard := auth.RequireRole(model.RoleCodeAdmin)
+				h = func(c *gin.Context) {
+					guard(c)
+					if c.IsAborted() {
+						return
+					}
+					opts.NotifyTestHandler(c)
+				}
+			}
+			api.POST("/notify/test", h)
 		}
 		if opts.NotifyHealthHandler != nil {
 			api.GET("/notify/health", opts.NotifyHealthHandler)
@@ -150,19 +177,38 @@ func New(opts Options) *gin.Engine {
 		// /strategies group so :id is shared between CRUD and
 		// trial-run endpoints.
 		if opts.StrategyRoutes != nil || opts.TrialRunRoutes != nil || opts.TemplateRoutes != nil {
-			strat := api.Group("/strategies")
+			stratRead := api.Group("/strategies")
+			stratWrite := api.Group("/strategies")
+			if opts.AuthMiddleware != nil {
+				stratWrite.Use(auth.RequireRole(model.RoleCodeAdmin, model.RoleCodeEditor))
+			}
+			// registerSplittable uses the splitter interface when available,
+			// otherwise falls back to RegisterRoutes on the read group.
+			registerSplittable := func(reg RouteRegistrar, gRead, gWrite *gin.RouterGroup) {
+				if s, ok := reg.(ReadWriteRouteSplitter); ok {
+					s.RegisterReadRoutes(gRead)
+					s.RegisterWriteRoutes(gWrite)
+				} else {
+					reg.RegisterRoutes(gRead)
+				}
+			}
 			if opts.StrategyRoutes != nil {
-				opts.StrategyRoutes.RegisterRoutes(strat)
+				registerSplittable(opts.StrategyRoutes, stratRead, stratWrite)
 			}
 			if opts.TrialRunRoutes != nil {
-				opts.TrialRunRoutes.RegisterRoutes(strat)
+				registerSplittable(opts.TrialRunRoutes, stratRead, stratWrite)
 			}
 			if opts.TemplateRoutes != nil {
-				opts.TemplateRoutes.RegisterRoutes(strat)
+				registerSplittable(opts.TemplateRoutes, stratRead, stratWrite)
 			}
-			// §11 AI assistant: /strategies/:id/ai/*.
+			// §11 AI assistant: /strategies/:id/ai/* — AI edits strategies,
+			// so it goes under the write group (admin/editor).
 			if opts.AIRoutes != nil {
-				opts.AIRoutes.RegisterRoutes(strat.Group("/:id/ai"))
+				if opts.AuthMiddleware != nil {
+					opts.AIRoutes.RegisterRoutes(stratWrite.Group("/:id/ai"))
+				} else {
+					opts.AIRoutes.RegisterRoutes(stratRead.Group("/:id/ai"))
+				}
 			}
 		}
 		// A7 runs + recommendations routes.
@@ -186,9 +232,13 @@ func New(opts Options) *gin.Engine {
 		if opts.ReviewRoutes != nil {
 			opts.ReviewRoutes.RegisterRoutes(api.Group("/reviews"))
 		}
-		// LLM settings.
+		// LLM settings — runtime secrets/config, admin only (§9 audit).
 		if opts.SettingsRoutes != nil {
-			opts.SettingsRoutes.RegisterRoutes(api.Group("/settings"))
+			settings := api.Group("/settings")
+			if opts.AuthMiddleware != nil {
+				settings.Use(auth.RequireRole(model.RoleCodeAdmin))
+			}
+			opts.SettingsRoutes.RegisterRoutes(settings)
 		}
 	}
 

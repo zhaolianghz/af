@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	crand "crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -85,6 +86,12 @@ func main() {
 	}
 	defer logger.Sync(l)
 
+	// rootCtx is the process-wide parent for background work (cron
+	// runs, etc.). Cancelled as soon as shutdown begins so in-flight
+	// jobs don't leak past exit.
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
 	l.Info("starting af-backend",
 		zap.String("env", cfg.App.Env),
 		zap.String("version", cfg.App.Version),
@@ -153,7 +160,7 @@ func main() {
 	if db != nil {
 		execDeps.Strategy = orchestrator.NewStrategyService(db, l)
 	}
-	executorRoutes, sched, schedulerStop, err := initExecutor(execDeps, cfg)
+	executorRoutes, sched, schedulerStop, err := initExecutor(execDeps, cfg, rootCtx)
 	if err != nil {
 		l.Error("init executor failed", zap.Error(err))
 		os.Exit(1)
@@ -274,11 +281,13 @@ func main() {
 		}
 		secret := cfg.Auth.JWTSecret
 		if secret == "" {
-			secret = randomSecret(48)
-			l.Warn("auth: AUTH_JWT_SECRET empty; generated an ephemeral secret. "+
-				"Set a stable secret in config/env or all tokens invalidate on restart.",
-				zap.String("generated_secret", secret),
-			)
+		secret = randomSecret(48)
+		// Audit #12: never log the secret itself — only its fingerprint.
+		sum := sha256.Sum256([]byte(secret))
+		l.Warn("auth: AUTH_JWT_SECRET empty; generated an ephemeral secret. "+
+			"Set a stable secret in config/env or all tokens invalidate on restart.",
+			zap.String("secret_fingerprint", hex.EncodeToString(sum[:8])),
+		)
 		}
 		authSvc := auth.NewService(db, secret, cfg.Auth.TokenTTL)
 		genPw, berr := authSvc.Bootstrap(context.Background(), cfg.Auth.AdminUser, cfg.Auth.AdminPassword)
@@ -302,12 +311,13 @@ func main() {
 		authProtectedRoutes = authHandler.ProtectedRoutes()
 		l.Info("auth enabled", zap.Duration("token_ttl", cfg.Auth.TokenTTL))
 	} else {
-		l.Info("auth disabled by config; /api/v1 is open")
+		l.Warn("auth disabled by config; /api/v1 is OPEN (write endpoints unauthenticated) — production builds refuse to start this way")
 	}
 
 	// 5. Router
 	r := router.New(router.Options{
 		APIBasePath:             cfg.Server.APIBasePath,
+		CORSAllowedOrigins:      cfg.Server.CORSOrigins,
 		Logger:                  l,
 		Version:                 version,
 		DB:                      db,
@@ -354,6 +364,7 @@ func main() {
 	select {
 	case sig := <-quit:
 		l.Info("received signal, shutting down", zap.String("signal", sig.String()))
+		rootCancel() // cancel cron-fired runs immediately
 	case err := <-serverErr:
 		if err != nil {
 			l.Error("server failed", zap.Error(err))
@@ -600,7 +611,8 @@ type ExecutorDeps struct {
 // initExecutor wires the run-level executor + cron scheduler +
 // 5 templates + 7 HTTP routes. Returns the executorpkg.Handler
 // for the router plus a shutdown hook that stops the scheduler.
-func initExecutor(d ExecutorDeps, cfg *config.Config) (router.RouteRegistrar, *executorpkg.Scheduler, func(context.Context) error, error) {
+// baseCtx parents cron-fired runs so graceful shutdown cancels them.
+func initExecutor(d ExecutorDeps, cfg *config.Config, baseCtx context.Context) (router.RouteRegistrar, *executorpkg.Scheduler, func(context.Context) error, error) {
 	if d.DB == nil {
 		d.Logger.Warn("executor: DB unavailable; run + recommendation routes disabled")
 		return nil, nil, nil, nil
@@ -632,6 +644,7 @@ func initExecutor(d ExecutorDeps, cfg *config.Config) (router.RouteRegistrar, *e
 		Executor: executor,
 		Calendar: cal,
 		Strategy: d.Strategy,
+		BaseCtx:  baseCtx,
 	})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("scheduler: %w", err)

@@ -50,3 +50,31 @@ func UserID(c *gin.Context) uint64 {
 	}
 	return 0
 }
+
+// Role returns the authenticated role code from the context ("" if none).
+func Role(c *gin.Context) string {
+	if v, ok := c.Get(ctxRole); ok {
+		if r, ok := v.(string); ok {
+			return r
+		}
+	}
+	return ""
+}
+
+// RequireRole returns middleware that only lets requests carrying one of
+// the given role codes through. It must be mounted AFTER Service.Middleware
+// (which populates the role). Requests without a matching role get 403.
+func RequireRole(roles ...string) gin.HandlerFunc {
+	allowed := make(map[string]bool, len(roles))
+	for _, r := range roles {
+		allowed[r] = true
+	}
+	return func(c *gin.Context) {
+		if !allowed[Role(c)] {
+			httpresp.Err(c, apperr.Forbidden("当前角色无权访问该资源"))
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
