@@ -9,8 +9,8 @@ package indicators
 // bar's close.
 //
 // RSV = (close - lowest_low_n) / (highest_high_n - lowest_low_n) * 100
-// K = SMA(RSV, m1)
-// D = SMA(K, m2)
+// K = recursive SMA of RSV with weight m1 (seeded at 50)
+// D = recursive SMA of K   with weight m2 (seeded at 50)
 // J = 3*K - 2*D
 func KDJ(high, low, close []float64, n, m1, m2 int) (k, d, j []float64) {
 	if n <= 0 {
@@ -55,19 +55,36 @@ func KDJ(high, low, close []float64, n, m1, m2 int) (k, d, j []float64) {
 			rsv[i] = (close[i] - ll) / (hh - ll) * 100.0
 		}
 	}
-	// K is SMA(RSV, m1) seeded at the first non-NaN rsv.
-	// Standard practice: K is seeded with 50 (or the first
-	// RSV) and updated with the recurrence K = (m1-1)/m1*K_prev
-	// + 1/m1*RSV. We use the SMA form which is equivalent for
-	// a uniform m1.
-	k = SMA(rsv, m1)
-	d = SMA(k, m2)
-	for i := 0; i < L; i++ {
-		if isFinite(k[i]) && isFinite(d[i]) {
-			j[i] = 3*k[i] - 2*d[i]
-		} else {
-			j[i] = NaN
-		}
+	// K/D use the standard KDJ recursive SMA (Wilder-style),
+	// NOT the rolling arithmetic mean:
+	//   K[i] = (m1-1)/m1·K[i-1] + 1/m1·RSV[i],  seeded K=50
+	//   D[i] = (m2-1)/m2·D[i-1] + 1/m2·K[i],    seeded D=50
+	// The previous implementation called the rolling MA on the
+	// NaN-prefixed RSV series; MA seeds its running sum with the
+	// first m1 values (all NaN during the RSV warm-up), and
+	// NaN+x=NaN is permanent, so K/D/J were NaN for EVERY bar.
+	// The indicator node then mapped that to 0 via lastFinite,
+	// silently corrupting every KDJ-based filter.
+	//
+	// RSV is finite on exactly the contiguous suffix [n-1, L),
+	// so we seed K/D at index n-1 and iterate forward. k/d/j
+	// were initialized to all-NaN above; positions before n-1
+	// stay NaN (genuine warm-up), the rest become finite.
+	seed := 50.0
+	kw := float64(m1-1) / float64(m1)
+	kr := 1.0 / float64(m1)
+	dw := float64(m2-1) / float64(m2)
+	dr := 1.0 / float64(m2)
+	k[n-1] = seed
+	d[n-1] = seed
+	for i := n; i < L; i++ {
+		k[i] = kw*k[i-1] + kr*rsv[i]
+	}
+	for i := n; i < L; i++ {
+		d[i] = dw*d[i-1] + dr*k[i]
+	}
+	for i := n - 1; i < L; i++ {
+		j[i] = 3*k[i] - 2*d[i]
 	}
 	return k, d, j
 }

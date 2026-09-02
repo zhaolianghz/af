@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -241,8 +242,35 @@ func (e *Executor) Execute(ctx context.Context, rc *RunContext, req *RunRequest)
 		inFlight++
 		go func() {
 			sem <- struct{}{}
+			// Released in LIFO order after the recover below, so a
+			// panicking node still frees its concurrency slot and
+			// cannot starve/deadlock the scheduler.
+			defer func() { <-sem }()
+			// A panic inside a node (or in Bus.Publish during event
+			// emission) must never crash the process: gin's Recovery
+			// middleware only covers the HTTP handler goroutine, not
+			// these worker goroutines. Recover and convert the panic
+			// into a failed NodeResult so the scheduler loop stays
+			// consistent and the run surfaces the failure instead of
+			// taking the whole server down. (Runs as the second defer,
+			// i.e. before the semaphore release above.)
+			defer func() {
+				if r := recover(); r != nil {
+					e.logger.Error("executor: node panic recovered",
+						zap.String("node_id", nodeID),
+						zap.Any("panic", r),
+						zap.ByteString("stack", debug.Stack()),
+					)
+					done <- NodeResult{
+						NodeID:     nodeID,
+						Status:     StatusFailed,
+						Error:      fmt.Sprintf("node %q panicked: %v", nodeID, r),
+						StartedAt:  rc.Now(),
+						FinishedAt: rc.Now(),
+					}
+				}
+			}()
 			res := e.runOneNode(ctx, rc, req, nodeID, payloads, &resultsMu, completed)
-			<-sem
 			done <- res
 		}()
 	}

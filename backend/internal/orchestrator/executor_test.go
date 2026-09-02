@@ -704,3 +704,87 @@ func TestExecuteToNode_TargetNotFound(t *testing.T) {
 		t.Errorf("ExecuteToNode(bad target): got %v, want ErrNodeNotFound", err)
 	}
 }
+
+// =============================================================================
+// Worker panic recovery (#6): a panicking node must not crash the
+// process; it is converted into a failed NodeResult and the run ends
+// with status "failed". Without the recover in dispatch(), the panic
+// would propagate out of the worker goroutine and terminate the test
+// binary (and, in production, the whole server).
+// =============================================================================
+
+type panicNode struct {
+	typ string
+}
+
+func (p *panicNode) Type() string    { return p.typ }
+func (p *panicNode) Subtype() string { return "" }
+func (p *panicNode) Schema() NodeSchema {
+	return NodeSchema{Description: "panicking " + p.typ}
+}
+func (p *panicNode) Run(ctx context.Context, rc *RunContext, in map[string]any) (map[string]any, error) {
+	panic("forced panic from " + p.typ)
+}
+
+func TestExecutor_NodePanicRecovered(t *testing.T) {
+	reg := newReg(&panicNode{typ: "a"})
+	e, rc := newExecRC(reg, NewMemBus())
+
+	summary, err := e.Execute(context.Background(), rc, &RunRequest{DAG: newLinearDAG("a")})
+
+	// The panic must surface as a failed node (firstErr), not a crash.
+	if err == nil {
+		t.Error("expected error from panicked node")
+	}
+	if summary == nil {
+		t.Fatal("summary should be non-nil even on panic")
+	}
+	if summary.Status != StatusFailed {
+		t.Errorf("Status: got %q want %q", summary.Status, StatusFailed)
+	}
+	r, ok := summary.NodeResults["a"]
+	if !ok {
+		t.Fatal("missing result for panicked node a")
+	}
+	if r.Status != StatusFailed {
+		t.Errorf("a: status %q want %q", r.Status, StatusFailed)
+	}
+	if r.Error == "" {
+		t.Error("a: expected non-empty error describing the panic")
+	}
+}
+
+// TestExecutor_NodePanicDoesNotDeadlockConcurrency verifies that a
+// panicking node releases its concurrency slot, so a subsequent ready
+// node can still be dispatched. Without the deferred semaphore release,
+// enough panics would leak all slots and wedge the scheduler.
+func TestExecutor_NodePanicDoesNotDeadlockConcurrency(t *testing.T) {
+	// maxConcurrency=1: one slot. Two roots: a panics, b must still
+	// be able to run after a's slot is freed.
+	e := NewExecutor(ExecutorConfig{
+		Registry:       newReg(&panicNode{typ: "a"}, &recordingNode{typ: "b"}),
+		Logger:         zap.NewNop(),
+		MaxConcurrency: 1,
+		DefaultTimeout: 1 * time.Second,
+	})
+	rc := NewRunContext(RunContextOptions{Logger: zap.NewNop(), Bus: NewMemBus(), RunID: 1})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		summary, err := e.Execute(context.Background(), rc, &RunRequest{DAG: &DAG{
+			Nodes: []NodeDef{{ID: "a", Type: "a"}, {ID: "b", Type: "b"}},
+		}})
+		if err == nil {
+			t.Errorf("expected error from panicked node a")
+		}
+		if summary == nil || summary.NodeResults["b"].Status != StatusSuccess {
+			t.Errorf("b should still succeed after a's panic; got %+v", summary)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Execute deadlocked: panicked node leaked its concurrency slot")
+	}
+}

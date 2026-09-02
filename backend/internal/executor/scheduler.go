@@ -36,6 +36,11 @@ type SchedulerConfig struct {
 	// Location is the timezone for cron parsing. Defaults to
 	// config.Cron.Timezone.
 	Location *time.Location
+	// BaseCtx is the parent context for cron-fired runs. Wire the
+	// server root context so graceful shutdown cancels in-flight
+	// cron runs instead of leaking them past process exit. Defaults
+	// to context.Background().
+	BaseCtx context.Context
 }
 
 // Scheduler owns the cron runner. It is safe to call Add /
@@ -61,6 +66,9 @@ type Scheduler struct {
 func NewScheduler(cfg SchedulerConfig) (*Scheduler, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = zap.NewNop()
+	}
+	if cfg.BaseCtx == nil {
+		cfg.BaseCtx = context.Background()
 	}
 	if cfg.Location == nil {
 		loc, err := time.LoadLocation(cfg.Cron.Timezone)
@@ -208,7 +216,12 @@ func (s *Scheduler) fire(strategyID uint64) {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), s.cfgExecutorTimeout())
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("scheduler: cron run panicked", zap.Any("panic", r))
+			}
+		}()
+		ctx, cancel := context.WithTimeout(s.cfg.BaseCtx, s.cfgExecutorTimeout())
 		defer cancel()
 		if _, err := s.cfg.Executor.Execute(ctx, RunRequest{
 			StrategyID:  strategyID,

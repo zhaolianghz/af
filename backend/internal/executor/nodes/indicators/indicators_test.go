@@ -192,11 +192,10 @@ func TestMACD_ShortSeries(t *testing.T) {
 // =============================================================================
 
 func TestKDJ_KnownWindow(t *testing.T) {
-	// Use a long series so RSV is well-defined for many
-	// indices. We assert the result is well-shaped
-	// (right length, finite where expected) — see
-	// TestKDJ_AllNaNForCurrentImplementation for the
-	// known limitation of the SMA-based K computation.
+	// Monotonic series: highs=20+i, lows=10+i, closes=15+i.
+	// For i>=8 the 9-bar window has hh=20+i, ll=i+2, so RSV is
+	// constant at 13/18*100≈72.22. K is seeded at 50 and converges
+	// up toward RSV; D lags K; J=3K-2D.
 	highs := make([]float64, 20)
 	lows := make([]float64, 20)
 	closes := make([]float64, 20)
@@ -209,32 +208,44 @@ func TestKDJ_KnownWindow(t *testing.T) {
 	if len(k) != 20 || len(d) != 20 || len(j) != 20 {
 		t.Fatalf("series length mismatch")
 	}
-	// RSV is first valid at n-1=8; pre-window K should be
-	// NaN.
+	// RSV is first valid at n-1=8; pre-window K/D/J are NaN.
 	for i := 0; i < 8; i++ {
 		expectNaN(t, "k pre-window", k[i])
-	}
-	// D depends on K; pre-window D is NaN.
-	for i := 0; i < 8; i++ {
 		expectNaN(t, "d pre-window", d[i])
+		expectNaN(t, "j pre-window", j[i])
 	}
-	// The implementation propagates NaN through the K and
-	// D recurrences (see TestKDJ_AllNaNForCurrentImplementation
-	// below). So later K/D/J values may be NaN even though
-	// RSV is well-defined. We don't assert on those here.
+	// K is seeded at 50 at the first valid bar.
+	if !almostEqual(k[8], 50.0, 1e-9) {
+		t.Errorf("k[8] seed: got %v want 50", k[8])
+	}
+	// Post-warmup K is finite, stays in [0,100], and rises
+	// monotonically toward the constant RSV (~72.22).
+	for i := 8; i < 20; i++ {
+		if math.IsNaN(k[i]) || math.IsInf(k[i], 0) {
+			t.Errorf("k[%d]: not finite", i)
+		}
+		if k[i] < 0 || k[i] > 100 {
+			t.Errorf("k[%d]=%v out of [0,100]", i, k[i])
+		}
+		if i > 8 && !(k[i] > k[i-1]) {
+			t.Errorf("k not monotonic toward RSV: k[%d]=%v k[%d]=%v", i-1, k[i-1], i, k[i])
+		}
+	}
+	// J identity holds wherever K and D are finite.
+	for i := 8; i < 20; i++ {
+		if !almostEqual(j[i], 3*k[i]-2*d[i], 1e-9) {
+			t.Errorf("j[%d]: got %v want 3k-2d=%v", i, j[i], 3*k[i]-2*d[i])
+		}
+	}
 }
 
-func TestKDJ_AllNaNForCurrentImplementation(t *testing.T) {
-	// Known limitation: K = SMA(RSV, m1) seeds the running
-	// sum with rsv[0..m1-1] which are NaN when n > m1.
-	// NaN propagates through the recurrence
-	// `sum += values[i] - values[i-period]` because
-	// NaN + finite = NaN, so K is permanently NaN for the
-	// common n=9, m1=3 case. A future fix should switch
-	// to the explicit recurrence K = (m1-1)/m1*K_prev +
-	// 1/m1*RSV with K seeded at 50 at the first non-NaN
-	// index. This test pins the current behavior so the
-	// fix (when it lands) is visible as a test diff.
+// TestKDJ_FiniteAfterWarmup replaces the old
+// TestKDJ_AllNaNForCurrentImplementation, which pinned the
+// data-corrupting bug (K/D/J all NaN whenever n>m1) as "expected".
+// After the recursive-SMA rewrite, K/D/J are finite for every bar
+// from the first valid RSV onward; this test guards against any
+// regression to the NaN-poisoning behavior.
+func TestKDJ_FiniteAfterWarmup(t *testing.T) {
 	highs := make([]float64, 30)
 	lows := make([]float64, 30)
 	closes := make([]float64, 30)
@@ -244,21 +255,25 @@ func TestKDJ_AllNaNForCurrentImplementation(t *testing.T) {
 		closes[i] = float64(15 + i)
 	}
 	k, d, j := KDJ(highs, lows, closes, 9, 3, 3)
-	for i := 0; i < len(k); i++ {
-		if !math.IsNaN(k[i]) {
-			t.Errorf("k[%d]: expected NaN (current limitation), got %v", i, k[i])
-			break
+	// Warm-up (i<8) is genuinely NaN.
+	for i := 0; i < 8; i++ {
+		if !math.IsNaN(k[i]) || !math.IsNaN(d[i]) || !math.IsNaN(j[i]) {
+			t.Errorf("warm-up [%d]: expected NaN, got k=%v d=%v j=%v", i, k[i], d[i], j[i])
 		}
 	}
-	for i := 0; i < len(d); i++ {
-		if !math.IsNaN(d[i]) {
-			t.Errorf("d[%d]: expected NaN, got %v", i, d[i])
+	// From i=8 on, every value must be finite — the old bug
+	// left them all NaN.
+	for i := 8; i < len(k); i++ {
+		if math.IsNaN(k[i]) {
+			t.Errorf("k[%d]: expected finite after warmup, got NaN (regression of all-NaN bug)", i)
 			break
 		}
-	}
-	for i := 0; i < len(j); i++ {
-		if !math.IsNaN(j[i]) {
-			t.Errorf("j[%d]: expected NaN, got %v", i, j[i])
+		if math.IsNaN(d[i]) {
+			t.Errorf("d[%d]: expected finite after warmup, got NaN", i)
+			break
+		}
+		if math.IsNaN(j[i]) {
+			t.Errorf("j[%d]: expected finite after warmup, got NaN", i)
 			break
 		}
 	}
@@ -275,19 +290,31 @@ func TestKDJ_ShortSeries(t *testing.T) {
 }
 
 func TestKDJ_FlatWindow(t *testing.T) {
-	// All highs == lows → rsv defaults to 50. With a flat
-	// window we still hit the NaN-propagation bug documented
-	// in TestKDJ_AllNaNForCurrentImplementation, so K is
-	// all NaN. This test asserts the structured output
-	// (length matches input) and the first valid RSV
-	// (k[n-1] stays NaN, but the rsv helper is internal
-	// — we can only check the K length here).
+	// All highs == lows → RSV defaults to 50 at every bar.
+	// With RSV constant at 50, the recursive SMA keeps K and D
+	// pinned at their 50 seed, and J = 3*50-2*50 = 50.
 	highs := []float64{5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
 	lows := []float64{5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
 	closes := []float64{5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5}
 	k, d, j := KDJ(highs, lows, closes, 9, 3, 3)
 	if len(k) != 13 || len(d) != 13 || len(j) != 13 {
 		t.Fatalf("len: got %d/%d/%d want 13/13/13", len(k), len(d), len(j))
+	}
+	for i := 0; i < 8; i++ {
+		expectNaN(t, "k pre-window", k[i])
+		expectNaN(t, "d pre-window", d[i])
+		expectNaN(t, "j pre-window", j[i])
+	}
+	for i := 8; i < 13; i++ {
+		if !almostEqual(k[i], 50.0, 1e-9) {
+			t.Errorf("k[%d]: flat window should pin at 50, got %v", i, k[i])
+		}
+		if !almostEqual(d[i], 50.0, 1e-9) {
+			t.Errorf("d[%d]: flat window should pin at 50, got %v", i, d[i])
+		}
+		if !almostEqual(j[i], 50.0, 1e-9) {
+			t.Errorf("j[%d]: flat window should pin at 50, got %v", i, j[i])
+		}
 	}
 }
 
@@ -351,27 +378,27 @@ func TestBOLL_Defaults(t *testing.T) {
 func TestVolumeRatio_Basic(t *testing.T) {
 	vols := []float64{100, 100, 100, 100, 100, 200, 100, 100, 100, 100, 100}
 	out := VolumeRatio(vols, 5)
-	// First 4 entries are NaN.
-	for i := 0; i < 4; i++ {
+	// First 5 entries are NaN (need n prior bars).
+	for i := 0; i < 5; i++ {
 		expectNaN(t, "vr pre-window", out[i])
 	}
-	// out[4] = 100 / (sum(0..3)/5) = 100 / 80 = 1.25
-	if !almostEqual(out[4], 1.25, 1e-9) {
-		t.Errorf("vr[4]: got %v want 1.25", out[4])
+	// out[5] = 200 / avg(vols[0..4]) = 200 / 100 = 2.0
+	if !almostEqual(out[5], 2.0, 1e-9) {
+		t.Errorf("vr[5]: got %v want 2.0", out[5])
 	}
-	// out[5] = 200 / (sum(1..4)/5) = 200 / 80 = 2.5
-	if !almostEqual(out[5], 2.5, 1e-9) {
-		t.Errorf("vr[5]: got %v want 2.5", out[5])
+	// out[6] = 100 / avg(vols[1..5]) = 100 / 120
+	if !almostEqual(out[6], 100.0/120.0, 1e-9) {
+		t.Errorf("vr[6]: got %v want %v", out[6], 100.0/120.0)
 	}
 }
 
 func TestVolumeRatio_DefaultN(t *testing.T) {
 	out := VolumeRatio([]float64{1, 2, 3, 4, 5, 6}, 0)
-	// n <= 0 falls back to 5 → first 4 NaN.
-	for i := 0; i < 4; i++ {
+	// n <= 0 falls back to 5 → first 5 NaN.
+	for i := 0; i < 5; i++ {
 		expectNaN(t, "vr default-n pre-window", out[i])
 	}
-	expectFinite(t, "vr default-n[4]", out[4])
+	expectFinite(t, "vr default-n[5]", out[5])
 }
 
 func TestVolumeRatio_ZeroAvg(t *testing.T) {
@@ -380,7 +407,7 @@ func TestVolumeRatio_ZeroAvg(t *testing.T) {
 	// NaN.
 	vols := []float64{0, 0, 0, 0, 0, 5}
 	out := VolumeRatio(vols, 5)
-	// out[5] = 5 / 0 → NaN.
+	// out[5] = 5 / avg(0..4) = 5 / 0 → NaN.
 	if !math.IsNaN(out[5]) {
 		t.Errorf("zero-avg: expected NaN, got %v", out[5])
 	}

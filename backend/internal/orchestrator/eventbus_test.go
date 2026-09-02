@@ -177,3 +177,40 @@ loop:
 		t.Error("expected at least some events delivered")
 	}
 }
+
+// TestEventBus_ConcurrentPublishAndUnsubscribe is the regression for the
+// send-on-closed-channel panic. A subscriber that unsubscribes (closing
+// its channel) while a Publish is in flight used to race the publisher's
+// send and panic the process, because Publish released its read lock
+// before sending. This test hammers publish vs. subscribe/unsubscribe
+// churn and must not panic. Run with -race to catch the underlying data
+// race even when the panic window is missed.
+func TestEventBus_ConcurrentPublishAndUnsubscribe(t *testing.T) {
+	for iter := 0; iter < 200; iter++ {
+		bus := NewMemBus()
+		var wg sync.WaitGroup
+
+		// Publisher: fire events at run 1 as fast as possible.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 200; i++ {
+				bus.Publish(Event{RunID: 1, Type: EventNodeStarted})
+			}
+		}()
+
+		// Subscriber churn: subscribe + immediately unsubscribe,
+		// racing the publisher's send against the channel close.
+		for s := 0; s < 8; s++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < 50; i++ {
+					_, unsub := bus.Subscribe(1)
+					unsub()
+				}
+			}()
+		}
+		wg.Wait()
+	}
+}

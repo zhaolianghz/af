@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -62,9 +63,9 @@ type memSub struct {
 }
 
 type memBus struct {
-	mu        sync.RWMutex
-	subs      map[uint64][]*memSub
-	dropped   uint64
+	mu      sync.RWMutex
+	subs    map[uint64][]*memSub
+	dropped atomic.Uint64
 }
 
 func (b *memBus) Subscribe(runID uint64) (<-chan Event, func()) {
@@ -90,23 +91,29 @@ func (b *memBus) Subscribe(runID uint64) (<-chan Event, func()) {
 }
 
 func (b *memBus) Publish(evt Event) {
+	// Hold the read lock across the entire send loop so a
+	// concurrent unsubscribe cannot close a subscriber's channel
+	// between our snapshot and the send. Unsubscribe closes the
+	// channel under the write Lock (mutually exclusive with this
+	// RLock), which makes a send-on-closed-channel panic
+	// impossible. The per-send is non-blocking (select-default),
+	// so a slow consumer can't wedge the publisher or block
+	// another goroutine's unsubscribe.
+	//
+	// The dropped counter is atomic: many publishers can hold the
+	// RLock concurrently, so a plain uint64 increment under RLock
+	// would race.
 	b.mu.RLock()
-	subs := make([]*memSub, len(b.subs[evt.RunID]))
-	copy(subs, b.subs[evt.RunID])
-	b.mu.RUnlock()
-	for _, s := range subs {
+	defer b.mu.RUnlock()
+	for _, s := range b.subs[evt.RunID] {
 		select {
 		case s.ch <- evt:
 		default:
-			b.mu.Lock()
-			b.dropped++
-			b.mu.Unlock()
+			b.dropped.Add(1)
 		}
 	}
 }
 
 func (b *memBus) DroppedCount() uint64 {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.dropped
+	return b.dropped.Load()
 }
