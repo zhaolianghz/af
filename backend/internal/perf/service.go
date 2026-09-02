@@ -138,14 +138,23 @@ func (s *Service) ComputeOne(ctx context.Context, rec *model.Recommendation) (*m
 	}
 
 	loc := s.cal.Location()
-	t1Day := s.cal.NextTradingDay(inDay(rec.Date, loc))
+	t1Day, ok := s.cal.NextTradingDay(inDay(rec.Date, loc))
+	if !ok {
+		return nil, fmt.Errorf("%w: rec %d no trading day found within 366d after %s", ErrBadRecommendation, rec.ID, rec.Date.Format("2006-01-02"))
+	}
 	t3Day := t1Day
 	for i := 0; i < 2; i++ {
-		t3Day = s.cal.NextTradingDay(t3Day)
+		var ok3 bool
+		if t3Day, ok3 = s.cal.NextTradingDay(t3Day); !ok3 {
+			return nil, fmt.Errorf("%w: rec %d no trading day found while scanning T+3", ErrBadRecommendation, rec.ID)
+		}
 	}
 	t5Day := t3Day
 	for i := 0; i < 2; i++ {
-		t5Day = s.cal.NextTradingDay(t5Day)
+		var ok5 bool
+		if t5Day, ok5 = s.cal.NextTradingDay(t5Day); !ok5 {
+			return nil, fmt.Errorf("%w: rec %d no trading day found while scanning T+5", ErrBadRecommendation, rec.ID)
+		}
 	}
 
 	snap := &model.PerformanceSnapshot{
