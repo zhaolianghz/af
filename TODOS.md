@@ -22,19 +22,26 @@
 
 ## datasource
 
-- [ ] **P2 — eastmoney push2his K-line endpoint unreachable (EOF), local + prod.**
-  Found by /qa on main, 2026-07-07. `GetKLine` against
-  `push2his.eastmoney.com` dies with `http do: ... EOF` (anti-bot / IP
-  block — same class as the已知 "quote/push endpoints blocked from prod
-  IP" note below). sina/akshare fallbacks don't serve K-line in this
-  setup either, so any DAG with an `indicator` node fails at `ind_vr`
-  with "no kline series found in input". Payload-shape bug in the same
-  path (klines array-vs-string) was fixed by /qa (ISSUE-002,
-  a1bff63) — this remaining item is transport-level. Options: browser
-  UA + cookie warm-up on the eastmoney client, akshare sidecar `/kline`
-  endpoint, or a K-line cache seeding job.
-  - **Repro:** trial-run strategy #1 (from template 午后量能放大) →
-    `ds_kline` succeeds with 0 series, `ind_vr` fails.
+- [x] **P2 — eastmoney push2his K-line endpoint unreachable (EOF), local + prod.**
+  Shipped on main (`fix(datasource): resolve K-line blocker...`, 2026-08-31),
+  **verified live on prod**. Two-part fix:
+  - **Sidecar dual upstream:** `scripts/akshare-sidecar.py` now normalizes
+    both sina and tencent kline DataFrames (`_rows_from_df`), adds
+    `fetch_klines_tx` (`ak.stock_zh_a_hist_tx` — fully independent
+    upstream, `hasattr`-guarded for old akshare builds), and
+    `fetch_klines` falls through sina→tencent instead of raising. The
+    akshare adapter was the only enabled source in prod
+    (`config.docker.yaml`: eastmoney/sina both `enabled:false`), so this
+    is the fix that actually unblocks `ind_vr`.
+  - **Eastmoney browser fingerprint:** UA `af-backend/0.1` → real Chrome
+    UA + `Accept-Language`/`Connection` headers + lazy cookie warm-up
+    (`sync.Once`, probe kline host root after first success). Dormant in
+    prod while eastmoney is `enabled:false`; takes effect if re-enabled.
+  - **Prod verification:** sidecar rebuilt; `/kline?code=600519` returns
+    real candles; `fetch_klines_tx` independently returns 6 rows;
+    simulated sina failure → tencent takeover confirmed end-to-end.
+  - Payload-shape bug in the same path (klines array-vs-string) was
+    fixed earlier by /qa (ISSUE-002, a1bff63).
 
 - [x] **P2 — Real news source for the sidecar.** Shipped in
   `af-v1.3.2`. The akshare sidecar `/news` now serves per-stock news via

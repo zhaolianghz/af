@@ -247,7 +247,8 @@ func TestNextTradingDay_SkipsWeekend(t *testing.T) {
 	s := newSvcNoDB(t)
 	// Friday 2026-06-12 → next is Monday 2026-06-15.
 	friday := inTZ(time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC))
-	next := s.NextTradingDay(friday)
+	next, ok := s.NextTradingDay(friday)
+	require.True(t, ok, "NextTradingDay should find a trading day")
 	require.Equal(t, "2026-06-15", next.Format("2006-01-02"))
 }
 
@@ -255,7 +256,8 @@ func TestPreviousTradingDay_SkipsWeekend(t *testing.T) {
 	s := newSvcNoDB(t)
 	// Monday 2026-06-15 → previous is Friday 2026-06-12.
 	monday := inTZ(time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC))
-	prev := s.PreviousTradingDay(monday)
+	prev, ok := s.PreviousTradingDay(monday)
+	require.True(t, ok, "PreviousTradingDay should find a trading day")
 	require.Equal(t, "2026-06-12", prev.Format("2006-01-02"))
 }
 
@@ -272,7 +274,8 @@ func TestNextTradingDay_SkipsHoliday(t *testing.T) {
 		SyncedAt:  time.Now(),
 	}).Error)
 	thursday := inTZ(time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC))
-	next := s.NextTradingDay(thursday)
+	next, ok := s.NextTradingDay(thursday)
+	require.True(t, ok, "NextTradingDay should find a trading day")
 	require.Equal(t, "2026-06-15", next.Format("2006-01-02"))
 }
 

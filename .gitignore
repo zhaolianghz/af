@@ -103,3 +103,4 @@ backend/configs/config.yaml
 # Python sidecar bytecode
 __pycache__/
 *.pyc
+.gstack/

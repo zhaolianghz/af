@@ -63,6 +63,11 @@ type calendarConfig struct {
 type cachedDay struct {
 	isTrading bool
 	ok        bool
+	// transient marks entries written after a DB ERROR (not a clean
+	// "no row"). They expire quickly so a recovered DB is picked up
+	// promptly, while still absorbing the per-call query storm.
+	transient bool
+	expiresAt time.Time
 }
 
 // NewService builds a calendar Service. cfg.Timezone must be a
@@ -127,29 +132,31 @@ func (s *Service) IsTradingDay(day time.Time) bool {
 }
 
 // NextTradingDay returns the first trading day strictly after
-// `from`. Returns from unchanged when the input is malformed.
-func (s *Service) NextTradingDay(from time.Time) time.Time {
+// `from`. ok=false means no trading day was found within the
+// 366-day scan window (calendar data badly broken) — callers MUST
+// handle this instead of treating `from` as a trading day.
+func (s *Service) NextTradingDay(from time.Time) (time.Time, bool) {
 	day := from.In(s.cfg.timezone)
 	for i := 1; i <= 366; i++ {
 		cand := day.AddDate(0, 0, i)
 		if s.IsTradingDay(cand) {
-			return cand
+			return cand, true
 		}
 	}
-	return from
+	return from, false
 }
 
 // PreviousTradingDay returns the first trading day strictly
-// before `from`.
-func (s *Service) PreviousTradingDay(from time.Time) time.Time {
+// before `from`. ok=false when nothing found within 366 days.
+func (s *Service) PreviousTradingDay(from time.Time) (time.Time, bool) {
 	day := from.In(s.cfg.timezone)
 	for i := 1; i <= 366; i++ {
 		cand := day.AddDate(0, 0, -i)
 		if s.IsTradingDay(cand) {
-			return cand
+			return cand, true
 		}
 	}
-	return from
+	return from, false
 }
 
 // IsInTradingSession reports whether `at` (interpreted in
@@ -209,13 +216,17 @@ func (s *Service) key(day time.Time) string {
 	return day.In(s.cfg.timezone).Format("2006-01-02")
 }
 
+// negErrTTL bounds how long a DB-error negative cache entry is
+// trusted before we retry the DB.
+const negErrTTL = 30 * time.Second
+
 // lookup consults the cache, then the DB, then returns ok=false
 // (caller should fall back to the weekend rule).
 func (s *Service) lookup(key string, day time.Time) (cachedDay, bool) {
 	s.mu.RLock()
 	c, ok := s.cache[key]
 	s.mu.RUnlock()
-	if ok {
+	if ok && (!c.transient || time.Now().Before(c.expiresAt)) {
 		return c, true
 	}
 	if s.db == nil {
@@ -230,9 +241,12 @@ func (s *Service) lookup(key string, day time.Time) (cachedDay, bool) {
 	end := start.Add(24 * time.Hour)
 	if err := s.db.Where("date >= ? AND date < ?", start, end).First(&row).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			// Treat DB errors as "no data" rather than
-			// crashing the scheduler. The fallback to the
-			// weekend rule is the safe default.
+			// Treat DB errors as "no data" rather than crashing the
+			// scheduler — but negative-cache them with a short TTL so
+			// every IsTradingDay call doesn't hammer a flapping DB.
+			s.mu.Lock()
+			s.cache[key] = cachedDay{ok: false, transient: true, expiresAt: time.Now().Add(negErrTTL)}
+			s.mu.Unlock()
 			return cachedDay{}, false
 		}
 		// Not found: still cache the miss so we don't query
