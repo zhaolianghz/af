@@ -133,15 +133,16 @@ export default function SettingsPage(): JSX.Element {
     }
   };
 
-  // fetchModels pulls the provider's own /models list and switches the
+  // fetchModels pulls the provider's full /models list and switches the
   // row's model field to a dropdown (manual typing stays available via
-  // the "手动输入" option).
+  // the "手动输入" option). No chat-only filtering — the list is the
+  // provider's full menu; the operator picks.
   const fetchModels = async (i: number) => {
     setBusy(true);
     try {
       const res = await listProviderModels(rowToInput(rows[i]));
-      const chat = res.chat.length ? res.chat : res.all;
-      if (!chat.length) {
+      const models = res.models;
+      if (!models.length) {
         notifyError(new Error('服务商未返回模型列表,请手动填写模型名'), `第 ${i + 1} 个服务商`);
         return;
       }
@@ -150,13 +151,13 @@ export default function SettingsPage(): JSX.Element {
           idx === i
             ? {
                 ...r,
-                models: chat,
-                model: r.model && chat.includes(r.model) ? r.model : chat[0],
+                models,
+                model: r.model && models.includes(r.model) ? r.model : models[0],
               }
             : r,
         ),
       );
-      notifySuccess(`第 ${i + 1} 个服务商:共 ${res.all.length} 个模型,对话类 ${chat.length} 个`);
+      notifySuccess(`第 ${i + 1} 个服务商:共 ${models.length} 个模型`);
     } catch (e) {
       notifyError(e, `第 ${i + 1} 个服务商拉取模型失败`);
     } finally {

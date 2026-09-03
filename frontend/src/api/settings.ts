@@ -92,12 +92,11 @@ export async function testProvider(input: ProviderInput): Promise<void> {
 // =============================================================================
 // Model listing — populate the model dropdown from the provider's own
 // GET /models (OpenAI-compatible), so operators pick instead of
-// hand-typing model ids. Chat filters out embedding/image/audio ids.
+// hand-typing model ids. The full list is returned, unfiltered.
 // =============================================================================
 
 export interface ModelListResult {
-  all: string[];
-  chat: string[];
+  models: string[];
 }
 
 export async function listProviderModels(input: ProviderInput): Promise<ModelListResult> {

@@ -337,11 +337,10 @@ func (s *Service) TestProvider(ctx context.Context, in ProviderInput) error {
 	return nil
 }
 
-// ModelListResult feeds the settings page's model dropdown: the full
-// model-id list from the provider plus the chat-filtered subset.
+// ModelListResult feeds the settings page's model dropdown: the
+// provider's full model-id list, unfiltered.
 type ModelListResult struct {
-	All  []string `json:"all"`
-	Chat []string `json:"chat"`
+	Models []string `json:"models"`
 }
 
 // ListProviderModels fetches the provider's GET /models list (OpenAI-
@@ -358,11 +357,11 @@ func (s *Service) ListProviderModels(ctx context.Context, in ProviderInput) (*Mo
 	}
 	// Fill preset base_url when blank so "glm" alone works.
 	baseURL, _ := ai.ResolveEndpoint(in.Provider, in.BaseURL, "")
-	all, chat, err := ai.ListModels(ctx, baseURL, apiKey, s.timeout)
+	models, err := ai.ListModels(ctx, baseURL, apiKey, s.timeout)
 	if err != nil {
 		return nil, apperr.Wrap(apperr.CodeInternal, "拉取模型列表失败", err)
 	}
-	return &ModelListResult{All: all, Chat: chat}, nil
+	return &ModelListResult{Models: models}, nil
 }
 
 // applyChain builds a fallback chain from the enabled rows (in priority

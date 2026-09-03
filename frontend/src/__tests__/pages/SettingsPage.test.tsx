@@ -201,8 +201,7 @@ describe('SettingsPage change-password card', () => {
   it('fetches models and switches the model field to a dropdown', async () => {
     getProvidersMock.mockResolvedValue(CHAIN);
     listProviderModelsMock.mockResolvedValue({
-      all: ['deepseek-chat', 'deepseek-reasoner', 'text-embedding-3-small'],
-      chat: ['deepseek-chat', 'deepseek-reasoner'],
+      models: ['deepseek-chat', 'deepseek-reasoner', 'text-embedding-3-small'],
     });
     render(<SettingsPage />);
     await waitFor(() => expect(screen.getByText('#1')).toBeInTheDocument());
@@ -212,17 +211,17 @@ describe('SettingsPage change-password card', () => {
     // Click "拉取模型列表" on row #1.
     await userEvent.click(screen.getAllByRole('button', { name: '拉取模型列表' })[0]);
     await waitFor(() => expect(listProviderModelsMock).toHaveBeenCalled());
-    // Success toast reports chat count.
+    // Success toast reports the full count — no filtering.
     await waitFor(() =>
-      expect(notifySuccessMock).toHaveBeenCalledWith(expect.stringContaining('对话类 2 个')),
+      expect(notifySuccessMock).toHaveBeenCalledWith(expect.stringContaining('共 3 个模型')),
     );
-    // The model input became a select with the chat models; embedding
-    // models are filtered out.
+    // The model input became a select with the FULL list — embedding
+    // models stay selectable (the operator picks, no preset filter).
     const modelSelect = screen.getAllByRole('combobox')[1]; // 0 = provider preset
     expect(modelSelect).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'deepseek-chat' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'deepseek-reasoner' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'text-embedding-3-small' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'text-embedding-3-small' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: '手动输入…' })).toBeInTheDocument();
   });
 

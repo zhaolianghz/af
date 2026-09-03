@@ -30,16 +30,6 @@ func TestNormBase(t *testing.T) {
 	}
 }
 
-func TestIsChatModel(t *testing.T) {
-	assert.True(t, isChatModel("deepseek-chat"))
-	assert.True(t, isChatModel("glm-4.5"))
-	assert.True(t, isChatModel("qwen-plus"))
-	assert.False(t, isChatModel("text-embedding-3-small"))
-	assert.False(t, isChatModel("BAAI/bge-m3"))
-	assert.False(t, isChatModel("dall-e-3"))
-	assert.False(t, isChatModel("whisper-1"))
-}
-
 func TestListModels(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
@@ -59,18 +49,18 @@ func TestListModels(t *testing.T) {
 	defer srv.Close()
 
 	// Pasting the full /chat/completions endpoint must still work.
-	all, chat, err := ListModels(context.Background(), srv.URL+"/v1/chat/completions", "sk-test", 5*time.Second)
+	models, err := ListModels(context.Background(), srv.URL+"/v1/chat/completions", "sk-test", 5*time.Second)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"deepseek-chat", "deepseek-reasoner", "text-embedding-3-small"}, all)
-	assert.Equal(t, []string{"deepseek-chat", "deepseek-reasoner"}, chat)
+	// Full list, unfiltered — embedding models stay selectable.
+	assert.Equal(t, []string{"deepseek-chat", "deepseek-reasoner", "text-embedding-3-small"}, models)
 
 	// Bad key → 401 surfaces as an auth error.
-	_, _, err = ListModels(context.Background(), srv.URL+"/v1", "sk-wrong", 5*time.Second)
+	_, err = ListModels(context.Background(), srv.URL+"/v1", "sk-wrong", 5*time.Second)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "鉴权失败")
 }
 
 func TestListModelsRequiresKey(t *testing.T) {
-	_, _, err := ListModels(context.Background(), "https://x.example.com/v1", "", time.Second)
+	_, err := ListModels(context.Background(), "https://x.example.com/v1", "", time.Second)
 	require.Error(t, err)
 }
