@@ -107,6 +107,17 @@ func (m *DefaultManager) List() []string {
 	return out
 }
 
+// HasChannel reports whether any notification channel is registered.
+// Callers (e.g. the executor's notify node) use this to treat "operator
+// configured no channels" as a skip-worthy no-op instead of a hard
+// failure — an unconfigured channel stack is a normal deployment state,
+// not an error.
+func (m *DefaultManager) HasChannel() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.channels) > 0
+}
+
 // Send walks primary + fallbacks as described on the type. It always
 // returns a non-nil error when no channel succeeds; that error wraps
 // ErrAllChannelsFailed (so errors.Is(err, ErrAllChannelsFailed) works)

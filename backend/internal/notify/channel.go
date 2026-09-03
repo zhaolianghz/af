@@ -79,6 +79,9 @@ type Manager interface {
 	RegisterChannel(name string, ch Channel)
 	// List returns the registered channel names in registration order.
 	List() []string
+	// HasChannel reports whether any channel is registered. Implementations
+	// must be safe for concurrent use.
+	HasChannel() bool
 }
 
 // ErrAllChannelsFailed is returned by Manager.Send when every candidate

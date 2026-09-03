@@ -91,6 +91,18 @@ func (n *NotifyNode) Run(ctx context.Context, rc *orchestrator.RunContext, in ma
 		}, nil
 	}
 
+	// No channel configured is a normal deployment state (dingtalk/wecom
+	// both disabled), not a run failure. Report a skipped success so the
+	// run completes and the UI shows why nothing was sent.
+	if !rc.Notify.HasChannel() {
+		return map[string]any{
+			"sent":       false,
+			"skipped":    "no channel configured",
+			"subtype":    subtype,
+			"recipients": len(picks),
+		}, nil
+	}
+
 	if err := rc.Notify.Send(ctx, msg); err != nil {
 		return nil, fmt.Errorf("notify.Send: %w", err)
 	}

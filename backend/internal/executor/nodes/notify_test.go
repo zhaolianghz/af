@@ -24,6 +24,7 @@ type fakeNotify struct {
 	called  int
 	gotMsg  *notify.Message
 	gotErr  error
+	channels int
 }
 
 func (f *fakeNotify) Send(ctx context.Context, msg *notify.Message) error {
@@ -32,8 +33,9 @@ func (f *fakeNotify) Send(ctx context.Context, msg *notify.Message) error {
 	return f.gotErr
 }
 
-func (f *fakeNotify) RegisterChannel(name string, ch notify.Channel) {}
-func (f *fakeNotify) List() []string                                { return nil }
+func (f *fakeNotify) RegisterChannel(name string, ch notify.Channel) { f.channels++ }
+func (f *fakeNotify) List() []string                                 { return nil }
+func (f *fakeNotify) HasChannel() bool                               { return f.channels > 0 }
 
 func newNotifyRC(n notify.Manager) *orchestrator.RunContext {
 	return orchestrator.NewRunContext(orchestrator.RunContextOptions{
@@ -134,6 +136,7 @@ func TestNotify_DryRun_DefaultsToAlert_WhenNoSessionTag(t *testing.T) {
 
 func TestNotify_Sends(t *testing.T) {
 	f := &fakeNotify{}
+	f.RegisterChannel("dingtalk", nil) // presence only — Send is what's exercised
 	n := NewNotifyNode()
 	in := map[string]any{
 		"pred":                     map[string]any{"items": notifyPicks()},
@@ -147,8 +150,26 @@ func TestNotify_Sends(t *testing.T) {
 	require.NotNil(t, f.gotMsg)
 }
 
+// No registered channel is a normal deployment state (dingtalk/wecom
+// both disabled): the node must succeed with sent=false + skip reason,
+// never fail the run (prod Run #13 failed this way before the fix).
+func TestNotify_NoChannel_SkipsNotFails(t *testing.T) {
+	f := &fakeNotify{} // zero channels
+	n := NewNotifyNode()
+	in := map[string]any{
+		"pred":                     map[string]any{"items": notifyPicks()},
+		orchestrator.InputKeyParams: params(t, notifyParams{Subtype: "morning"}),
+	}
+	out, err := n.Run(context.Background(), newNotifyRC(f), in)
+	require.NoError(t, err)
+	require.Equal(t, false, out["sent"])
+	require.Equal(t, "no channel configured", out["skipped"])
+	require.Equal(t, 0, f.called)
+}
+
 func TestNotify_SendError_Propagates(t *testing.T) {
 	f := &fakeNotify{gotErr: errors.New("boom")}
+	f.RegisterChannel("dingtalk", nil) // HasChannel must be true so Send is reached
 	n := NewNotifyNode()
 	in := map[string]any{
 		"pred":                     map[string]any{"items": notifyPicks()},
@@ -168,6 +189,7 @@ func TestNotify_BuildAlert_DefaultDetail(t *testing.T) {
 	// node synthesizes a default message referencing the
 	// run and strategy.
 	f := &fakeNotify{}
+	f.RegisterChannel("dingtalk", nil)
 	n := NewNotifyNode()
 	rc := newNotifyRC(f)
 	in := map[string]any{
@@ -182,6 +204,7 @@ func TestNotify_BuildAlert_DefaultDetail(t *testing.T) {
 
 func TestNotify_BuildReview_UsesRunDate(t *testing.T) {
 	f := &fakeNotify{}
+	f.RegisterChannel("dingtalk", nil)
 	n := NewNotifyNode()
 	rc := newNotifyRC(f)
 	in := map[string]any{

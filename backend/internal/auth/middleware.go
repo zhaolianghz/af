@@ -20,15 +20,28 @@ const (
 // Middleware verifies the Bearer token on protected routes and stashes
 // the principal (user id / username / role) in the gin context for
 // downstream handlers + future per-role enforcement.
+//
+// Native EventSource cannot set an Authorization header (a long-standing
+// W3C gap), so SSE consumers fall back to an `access_token` query
+// parameter — the same escape hatch GitHub's API and Django Channels
+// use. Prefer the header whenever present; only read the query param
+// when the header is absent so a stolen-URL token never overrides a
+// real header credential.
 func (s *Service) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.GetHeader("Authorization")
-		if h == "" || !strings.HasPrefix(h, "Bearer ") {
+		token := ""
+		if strings.HasPrefix(h, "Bearer ") {
+			token = strings.TrimPrefix(h, "Bearer ")
+		} else if h == "" {
+			token = c.Query("access_token")
+		}
+		if token == "" {
 			httpresp.Err(c, apperr.Unauthorized("缺少登录凭证"))
 			c.Abort()
 			return
 		}
-		claims, err := s.Verify(strings.TrimPrefix(h, "Bearer "))
+		claims, err := s.Verify(token)
 		if err != nil {
 			httpresp.Err(c, err)
 			c.Abort()

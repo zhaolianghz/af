@@ -8,6 +8,7 @@
  * other endpoints).
  */
 import { apiClient, API_BASE_URL } from './client';
+import { getToken } from '@/stores/authStore';
 import type {
   RetryRunResponse,
   Run,
@@ -97,7 +98,16 @@ export function openRunEventStream(
   runId: number,
   handlers: RunEventHandlers,
 ): RunEventStream {
-  const url = `${API_BASE_URL}/runs/${runId}/events`;
+  // Native EventSource cannot send an Authorization header, so the
+  // token rides as an `access_token` query param — the backend's auth
+  // middleware accepts it as a Bearer fallback specifically for SSE.
+  // Omitted when auth is off (no token) or this is a cross-origin
+  // deployment without a stored session.
+  let url = `${API_BASE_URL}/runs/${runId}/events`;
+  const token = getToken();
+  if (token) {
+    url += `?access_token=${encodeURIComponent(token)}`;
+  }
   const es = new EventSource(url, { withCredentials: false });
   if (handlers.onOpen) es.addEventListener('open', () => handlers.onOpen?.());
 
