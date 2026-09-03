@@ -35,6 +35,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/llm/providers", h.GetProviders)
 	r.PUT("/llm/providers", h.SaveProviders)
 	r.POST("/llm/providers/test", h.TestProvider)
+	r.POST("/llm/providers/models", h.ListProviderModels)
 	// Legacy single-provider routes (kept for backward compatibility).
 	r.GET("/llm", h.GetLLM)
 	r.PUT("/llm", h.SaveLLM)
@@ -114,6 +115,27 @@ func (h *Handler) TestProvider(c *gin.Context) {
 		return
 	}
 	httpresp.OK(c, gin.H{"ok": true})
+}
+
+// ListProviderModels handles POST /settings/llm/providers/models —
+// fetch the provider's OpenAI-compatible model list (no persist) to
+// populate the settings page's model dropdown.
+func (h *Handler) ListProviderModels(c *gin.Context) {
+	if !h.ok() {
+		httpresp.Err(c, apperr.Unavailable("settings not wired"))
+		return
+	}
+	var b providerBody
+	if err := c.ShouldBindJSON(&b); err != nil {
+		httpresp.Err(c, apperr.InvalidArg(err.Error()))
+		return
+	}
+	res, err := h.svc.ListProviderModels(c.Request.Context(), b.toInput())
+	if err != nil {
+		httpresp.Err(c, err)
+		return
+	}
+	httpresp.OK(c, res)
 }
 
 func (h *Handler) ok() bool { return h.svc != nil }

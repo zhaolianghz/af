@@ -4,6 +4,7 @@ import {
   getProviders,
   saveProviders,
   testProvider,
+  listProviderModels,
   type ProviderView,
   type ProviderInput,
 } from '@/api/settings';
@@ -25,7 +26,9 @@ const PRESETS: Record<string, { label: string; base_url: string; model: string }
 };
 
 // Row is the editable client-side shape (api_key plaintext only while
-// editing; the server stores + masks it).
+// editing; the server stores + masks it). models holds the ids fetched
+// from the provider's /models endpoint — when non-empty the model
+// field renders as a dropdown.
 interface Row {
   id?: number;
   enabled: boolean;
@@ -35,6 +38,7 @@ interface Row {
   model: string;
   api_key_set: boolean;
   api_key_masked: string;
+  models?: string[];
 }
 
 function viewToRow(v: ProviderView): Row {
@@ -129,6 +133,37 @@ export default function SettingsPage(): JSX.Element {
     }
   };
 
+  // fetchModels pulls the provider's own /models list and switches the
+  // row's model field to a dropdown (manual typing stays available via
+  // the "手动输入" option).
+  const fetchModels = async (i: number) => {
+    setBusy(true);
+    try {
+      const res = await listProviderModels(rowToInput(rows[i]));
+      const chat = res.chat.length ? res.chat : res.all;
+      if (!chat.length) {
+        notifyError(new Error('服务商未返回模型列表,请手动填写模型名'), `第 ${i + 1} 个服务商`);
+        return;
+      }
+      setRows((rs) =>
+        rs.map((r, idx) =>
+          idx === i
+            ? {
+                ...r,
+                models: chat,
+                model: r.model && chat.includes(r.model) ? r.model : chat[0],
+              }
+            : r,
+        ),
+      );
+      notifySuccess(`第 ${i + 1} 个服务商:共 ${res.all.length} 个模型,对话类 ${chat.length} 个`);
+    } catch (e) {
+      notifyError(e, `第 ${i + 1} 个服务商拉取模型失败`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="max-w-3xl space-y-6">
       <div>
@@ -160,6 +195,7 @@ export default function SettingsPage(): JSX.Element {
               onMove={(d) => move(i, d)}
               onRemove={() => remove(i)}
               onTest={() => testOne(i)}
+              onFetchModels={() => fetchModels(i)}
             />
           ))}
 
@@ -273,6 +309,7 @@ function ProviderRow({
   onMove,
   onRemove,
   onTest,
+  onFetchModels,
 }: {
   row: Row;
   index: number;
@@ -283,6 +320,7 @@ function ProviderRow({
   onMove: (dir: -1 | 1) => void;
   onRemove: () => void;
   onTest: () => void;
+  onFetchModels: () => void;
 }): JSX.Element {
   const isMock = row.preset === 'mock';
   return (
@@ -318,12 +356,31 @@ function ProviderRow({
         </Field>
         {!isMock && (
           <Field label="模型">
-            <input
-              value={row.model}
-              onChange={(e) => onUpdate({ model: e.target.value })}
-              placeholder="deepseek-chat"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
-            />
+            {row.models && row.models.length > 0 ? (
+              <select
+                value={row.models.includes(row.model) ? row.model : '__manual__'}
+                onChange={(e) => {
+                  if (e.target.value === '__manual__') {
+                    onUpdate({ models: [] }); // switch back to free input
+                  } else {
+                    onUpdate({ model: e.target.value });
+                  }
+                }}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+              >
+                {row.models.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+                <option value="__manual__">手动输入…</option>
+              </select>
+            ) : (
+              <input
+                value={row.model}
+                onChange={(e) => onUpdate({ model: e.target.value })}
+                placeholder="deepseek-chat"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+              />
+            )}
           </Field>
         )}
       </div>
@@ -347,7 +404,10 @@ function ProviderRow({
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
             />
           </Field>
-          <div>
+          <div className="flex items-center gap-2">
+            <button onClick={onFetchModels} disabled={busy} className="btn-secondary text-xs">
+              拉取模型列表
+            </button>
             <button onClick={onTest} disabled={busy} className="btn-secondary text-xs">
               测试此服务商
             </button>

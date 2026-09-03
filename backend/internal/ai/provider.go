@@ -116,6 +116,7 @@ func BuildClient(provider, baseURL, apiKey, model string, timeout time.Duration)
 	case "", "mock":
 		return NewMockClient(), ""
 	default: // openai-compatible
+		baseURL = normBase(baseURL) // tolerate pasted full endpoints (.../chat/completions)
 		baseURL, model = ResolveEndpoint(provider, baseURL, model)
 		if baseURL == "" || apiKey == "" || model == "" {
 			return nil, "openai-compatible provider needs base_url, api_key and model"

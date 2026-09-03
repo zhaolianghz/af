@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 const getProvidersMock = vi.fn();
 const saveProvidersMock = vi.fn();
 const testProviderMock = vi.fn();
+const listProviderModelsMock = vi.fn();
 const notifyErrorMock = vi.fn();
 const notifySuccessMock = vi.fn();
 const changePasswordMock = vi.fn();
@@ -18,6 +19,7 @@ vi.mock('@/api/settings', () => ({
   getProviders: () => getProvidersMock(),
   saveProviders: (p: unknown) => saveProvidersMock(p),
   testProvider: (p: unknown) => testProviderMock(p),
+  listProviderModels: (p: unknown) => listProviderModelsMock(p),
 }));
 vi.mock('@/api/auth', () => ({
   changePassword: (o: string, n: string) => changePasswordMock(o, n),
@@ -64,6 +66,7 @@ beforeEach(() => {
   getProvidersMock.mockReset();
   saveProvidersMock.mockReset();
   testProviderMock.mockReset();
+  listProviderModelsMock.mockReset();
   notifyErrorMock.mockReset();
   notifySuccessMock.mockReset();
   changePasswordMock.mockReset();
@@ -193,5 +196,44 @@ describe('SettingsPage change-password card', () => {
     await userEvent.click(screen.getByRole('button', { name: '修改密码' }));
     await waitFor(() => expect(changePasswordMock).toHaveBeenCalledWith('oldpass1', 'newpassword1'));
     expect(notifySuccessMock).toHaveBeenCalled();
+  });
+
+  it('fetches models and switches the model field to a dropdown', async () => {
+    getProvidersMock.mockResolvedValue(CHAIN);
+    listProviderModelsMock.mockResolvedValue({
+      all: ['deepseek-chat', 'deepseek-reasoner', 'text-embedding-3-small'],
+      chat: ['deepseek-chat', 'deepseek-reasoner'],
+    });
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByText('#1')).toBeInTheDocument());
+    // The first row's model is currently a free input.
+    const modelInput = screen.getAllByPlaceholderText('deepseek-chat')[0];
+    expect(modelInput).toBeInTheDocument();
+    // Click "拉取模型列表" on row #1.
+    await userEvent.click(screen.getAllByRole('button', { name: '拉取模型列表' })[0]);
+    await waitFor(() => expect(listProviderModelsMock).toHaveBeenCalled());
+    // Success toast reports chat count.
+    await waitFor(() =>
+      expect(notifySuccessMock).toHaveBeenCalledWith(expect.stringContaining('对话类 2 个')),
+    );
+    // The model input became a select with the chat models; embedding
+    // models are filtered out.
+    const modelSelect = screen.getAllByRole('combobox')[1]; // 0 = provider preset
+    expect(modelSelect).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'deepseek-chat' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'deepseek-reasoner' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'text-embedding-3-small' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '手动输入…' })).toBeInTheDocument();
+  });
+
+  it('surfaces a fetch failure as an error toast and keeps the input', async () => {
+    getProvidersMock.mockResolvedValue(CHAIN);
+    listProviderModelsMock.mockRejectedValue(new Error('key 鉴权失败'));
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByText('#1')).toBeInTheDocument());
+    await userEvent.click(screen.getAllByRole('button', { name: '拉取模型列表' })[0]);
+    await waitFor(() => expect(notifyErrorMock).toHaveBeenCalled());
+    // Still a free input.
+    expect(screen.getAllByPlaceholderText('deepseek-chat')[0]).toBeInTheDocument();
   });
 });

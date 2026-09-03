@@ -88,3 +88,22 @@ export async function saveProviders(providers: ProviderInput[]): Promise<ChainVi
 export async function testProvider(input: ProviderInput): Promise<void> {
   await apiClient.post('/settings/llm/providers/test', input);
 }
+
+// =============================================================================
+// Model listing — populate the model dropdown from the provider's own
+// GET /models (OpenAI-compatible), so operators pick instead of
+// hand-typing model ids. Chat filters out embedding/image/audio ids.
+// =============================================================================
+
+export interface ModelListResult {
+  all: string[];
+  chat: string[];
+}
+
+export async function listProviderModels(input: ProviderInput): Promise<ModelListResult> {
+  const { data } = await apiClient.post<{ code: number; data: ModelListResult }>(
+    '/settings/llm/providers/models',
+    input,
+  );
+  return data.data;
+}

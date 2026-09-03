@@ -337,6 +337,34 @@ func (s *Service) TestProvider(ctx context.Context, in ProviderInput) error {
 	return nil
 }
 
+// ModelListResult feeds the settings page's model dropdown: the full
+// model-id list from the provider plus the chat-filtered subset.
+type ModelListResult struct {
+	All  []string `json:"all"`
+	Chat []string `json:"chat"`
+}
+
+// ListProviderModels fetches the provider's GET /models list (OpenAI-
+// compatible) without persisting anything. KeepKey pulls the stored
+// secret by id, so the UI can list models for an already-saved row
+// without re-typing the key.
+func (s *Service) ListProviderModels(ctx context.Context, in ProviderInput) (*ModelListResult, error) {
+	apiKey := in.APIKey
+	if in.KeepKey && apiKey == "" && s.db != nil && in.ID > 0 {
+		var row model.LLMProvider
+		if s.db.WithContext(ctx).First(&row, in.ID).Error == nil {
+			apiKey = row.APIKey
+		}
+	}
+	// Fill preset base_url when blank so "glm" alone works.
+	baseURL, _ := ai.ResolveEndpoint(in.Provider, in.BaseURL, "")
+	all, chat, err := ai.ListModels(ctx, baseURL, apiKey, s.timeout)
+	if err != nil {
+		return nil, apperr.Wrap(apperr.CodeInternal, "拉取模型列表失败", err)
+	}
+	return &ModelListResult{All: all, Chat: chat}, nil
+}
+
 // applyChain builds a fallback chain from the enabled rows (in priority
 // order) and hot-swaps the live Provider. No enabled rows → disabled.
 func (s *Service) applyChain(rows []model.LLMProvider) {
