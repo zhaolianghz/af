@@ -70,6 +70,7 @@ export interface CanvasState {
 
   addNode: (type: NodeType, position: { x: number; y: number }) => string;
   updateNodeData: (id: string, patch: Partial<RFNode['data']>) => void;
+  applyPositions: (positions: Record<string, { x: number; y: number }>) => void;
   removeNode: (id: string) => void;
   removeEdge: (id: string) => void;
 
@@ -170,6 +171,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set((s) => ({
       nodes: s.nodes.map((n) =>
         n.id === id ? { ...n, data: { ...n.data, ...patch } } : n,
+      ),
+      saveStatus: 'dirty',
+    })),
+
+  // Batch position update (auto-layout). One set() so the whole
+  // reposition is a single dirty-flagging state transition.
+  applyPositions: (positions) =>
+    set((s) => ({
+      nodes: s.nodes.map((n) =>
+        positions[n.id] ? { ...n, position: positions[n.id] } : n,
       ),
       saveStatus: 'dirty',
     })),

@@ -112,4 +112,63 @@ describe('useCanvasHotkeys', () => {
     // Node should still be present — listener was removed.
     expect(useCanvasStore.getState().nodes.find((n) => n.id === id)).toBeDefined();
   });
+
+  // ---------------------------------------------------------------------------
+  // Edge deletion + fit-view hotkeys
+  // ---------------------------------------------------------------------------
+
+  it('removes the selected edge on Delete', () => {
+    const a = useCanvasStore.getState().addNode('filter', { x: 0, y: 0 });
+    const b = useCanvasStore.getState().addNode('rank', { x: 300, y: 0 });
+    useCanvasStore.getState().onConnect({ source: a, target: b, sourceHandle: null, targetHandle: null });
+    const edgeId = useCanvasStore.getState().edges[0].id;
+    useCanvasStore.getState().selectEdge(edgeId);
+    renderHook(() => useCanvasHotkeys(vi.fn()));
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+    expect(useCanvasStore.getState().edges).toHaveLength(0);
+    // Both nodes survive.
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+  });
+
+  it('removes the selected edge on Backspace', () => {
+    const a = useCanvasStore.getState().addNode('filter', { x: 0, y: 0 });
+    const b = useCanvasStore.getState().addNode('rank', { x: 300, y: 0 });
+    useCanvasStore.getState().onConnect({ source: a, target: b, sourceHandle: null, targetHandle: null });
+    useCanvasStore.getState().selectEdge(useCanvasStore.getState().edges[0].id);
+    renderHook(() => useCanvasHotkeys(vi.fn()));
+
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    expect(useCanvasStore.getState().edges).toHaveLength(0);
+  });
+
+  it('node deletion wins when both a node and an edge are selected', () => {
+    const a = useCanvasStore.getState().addNode('filter', { x: 0, y: 0 });
+    const b = useCanvasStore.getState().addNode('rank', { x: 300, y: 0 });
+    useCanvasStore.getState().onConnect({ source: a, target: b, sourceHandle: null, targetHandle: null });
+    useCanvasStore.getState().selectEdge(useCanvasStore.getState().edges[0].id);
+    useCanvasStore.getState().selectNode(a);
+    renderHook(() => useCanvasHotkeys(vi.fn()));
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
+  });
+
+  it('Shift+1 and Shift+F trigger fit view', () => {
+    const fit = vi.fn();
+    renderHook(() => useCanvasHotkeys(vi.fn(), fit));
+
+    fireEvent.keyDown(window, { key: '!', shiftKey: true });
+    fireEvent.keyDown(window, { key: 'F', shiftKey: true });
+    expect(fit).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hijack plain 1/F without shift', () => {
+    const fit = vi.fn();
+    renderHook(() => useCanvasHotkeys(vi.fn(), fit));
+
+    fireEvent.keyDown(window, { key: '1' });
+    fireEvent.keyDown(window, { key: 'F' });
+    expect(fit).not.toHaveBeenCalled();
+  });
 });

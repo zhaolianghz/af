@@ -70,11 +70,20 @@ function summarizeParams(params: Record<string, unknown> | undefined): string {
   if (entries.length === 0) return '';
   return entries
     .slice(0, 4)
-    .map(([k, v]) => {
-      const s = typeof v === 'string' ? v : JSON.stringify(v);
-      return `${k}=${truncate(s, 18)}`;
-    })
+    .map(([k, v]) => `${k}=${truncate(formatValue(v), 20)}`)
     .join('\n');
+}
+
+// formatValue renders scalars directly; arrays show item count + a
+// peek of the first item (a truncated JSON blob told you nothing
+// about what's actually in a 20-element stock_codes list).
+function formatValue(v: unknown): string {
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '[]';
+    const first = typeof v[0] === 'string' ? v[0] : JSON.stringify(v[0]);
+    return `${v.length} 项: ${first}${v.length > 1 ? ', …' : ''}`;
+  }
+  return typeof v === 'string' ? v : JSON.stringify(v);
 }
 
 function truncate(s: string, n: number): string {

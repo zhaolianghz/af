@@ -2,7 +2,9 @@
 /**
  * Canvas — ReactFlow container. Mounts the NodeView / EdgeView
  * renderers, wires the store's change handlers, and accepts drag-
- * drops from the NodePalette.
+ * drops from the NodePalette. Also hosts the floating graph tools
+ * (auto-layout + fit-view) and reports fitView up to the page for
+ * the Shift+1 / Shift+F hotkey.
  */
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import ReactFlow, {
@@ -16,6 +18,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css';
 import { useCanvasStore } from '@/stores/canvasStore';
 import { NODE_TYPES, type NodeType } from '@/types/orchestrator';
+import { layeredLayout } from './layout';
 import NodeView from './NodeView';
 import EdgeView from './EdgeView';
 
@@ -27,15 +30,24 @@ const nodeTypes = Object.fromEntries(
 );
 const edgeTypes = { default: EdgeView };
 
-export default function Canvas(): JSX.Element {
+export default function Canvas({
+  onFitViewReady,
+}: {
+  /** Called once per fitView implementation so the page can bind Shift+1/Shift+F. */
+  onFitViewReady?: (fit: () => void) => void;
+}): JSX.Element {
   return (
     <ReactFlowProvider>
-      <CanvasInner />
+      <CanvasInner onFitViewReady={onFitViewReady} />
     </ReactFlowProvider>
   );
 }
 
-function CanvasInner(): JSX.Element {
+function CanvasInner({
+  onFitViewReady,
+}: {
+  onFitViewReady?: (fit: () => void) => void;
+}): JSX.Element {
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
@@ -47,9 +59,19 @@ function CanvasInner(): JSX.Element {
   const selectEdge = useCanvasStore((s) => s.selectEdge);
   const addNode = useCanvasStore((s) => s.addNode);
   const removeEdge = useCanvasStore((s) => s.removeEdge);
+  const applyPositions = useCanvasStore((s) => s.applyPositions);
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const rfRef = useRef<ReactFlowInstance | null>(null);
+
+  const fitView = useCallback(() => {
+    rfRef.current?.fitView({ padding: 0.2, duration: 200 });
+  }, []);
+
+  // Expose fitView to the page (hotkey binding) once mounted.
+  useEffect(() => {
+    onFitViewReady?.(fitView);
+  }, [fitView, onFitViewReady]);
 
   // Re-fit the viewport whenever the node set changes identity (e.g. a
   // strategy loads its DAG after mount, or the AI assistant applies a
@@ -60,11 +82,20 @@ function CanvasInner(): JSX.Element {
   const nodeCount = nodes.length;
   useEffect(() => {
     if (nodeCount === 0) return;
-    const id = window.setTimeout(() => {
-      rfRef.current?.fitView({ padding: 0.2, duration: 200 });
-    }, 60);
+    const id = window.setTimeout(fitView, 60);
     return () => window.clearTimeout(id);
-  }, [nodeCount]);
+  }, [nodeCount, fitView]);
+
+  // Auto-layout: layered left→right by longest-path level, then fit.
+  const onAutoLayout = useCallback(() => {
+    const { positions } = layeredLayout(
+      nodes,
+      edges.map((e) => ({ source: e.source, target: e.target })),
+    );
+    applyPositions(positions);
+    // Let ReactFlow ingest the new positions before fitting.
+    window.setTimeout(fitView, 30);
+  }, [nodes, edges, applyPositions, fitView]);
 
   // Mark currently-selected node in the ReactFlow node array. Spread
   // the whole node — ReactFlow is controlled here, so the measured
@@ -141,15 +172,39 @@ function CanvasInner(): JSX.Element {
         onDragOver={onDragOver}
         onDrop={onDrop}
         fitView
+        minZoom={0.1}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} size={1} color="#e2e8f0" />
-        <Controls className="!bottom-4 !left-4" />
+        <Controls className="!bottom-4 !left-4" showInteractive={false} />
         <MiniMap
           className="!bottom-4 !right-4"
           nodeColor={(n) => nodeColor(n.type as NodeType)}
           maskColor="rgba(241,245,249,0.7)"
+          pannable
+          zoomable
         />
+        {/* Floating graph tools — above the canvas, left of the minimap. */}
+        <div className="absolute right-4 top-4 z-10 flex gap-1.5">
+          <button
+            type="button"
+            onClick={onAutoLayout}
+            disabled={nodes.length === 0}
+            title="按数据流向自动排版"
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+          >
+            ⌗ 自动排版
+          </button>
+          <button
+            type="button"
+            onClick={fitView}
+            disabled={nodes.length === 0}
+            title="适配视图 (Shift+1)"
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+          >
+            ⤢ 适配视图
+          </button>
+        </div>
       </ReactFlow>
     </div>
   );

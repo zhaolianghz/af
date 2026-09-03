@@ -16,11 +16,15 @@
 import { useEffect, useRef } from 'react';
 import { useCanvasStore } from '@/stores/canvasStore';
 
-export function useCanvasHotkeys(onSave: () => void): void {
+export function useCanvasHotkeys(onSave: () => void, onFitView?: () => void): void {
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId);
+  const selectedEdgeId = useCanvasStore((s) => s.selectedEdgeId);
   const removeNode = useCanvasStore((s) => s.removeNode);
+  const removeEdge = useCanvasStore((s) => s.removeEdge);
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const onFitViewRef = useRef(onFitView);
+  onFitViewRef.current = onFitView;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -37,14 +41,31 @@ export function useCanvasHotkeys(onSave: () => void): void {
         return;
       }
 
-      // Delete / Backspace → remove selected node.
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
+      // Shift+1 / Shift+F → fit view (ReactFlow's convention).
+      if ((e.key === '!' || e.key === '1') && e.shiftKey && !mod) {
         e.preventDefault();
-        removeNode(selectedNodeId);
+        onFitViewRef.current?.();
+        return;
+      }
+      if (e.key === 'F' && e.shiftKey && !mod) {
+        e.preventDefault();
+        onFitViewRef.current?.();
+        return;
+      }
+
+      // Delete / Backspace → remove the selected node OR edge.
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedNodeId) {
+          e.preventDefault();
+          removeNode(selectedNodeId);
+        } else if (selectedEdgeId) {
+          e.preventDefault();
+          removeEdge(selectedEdgeId);
+        }
       }
     };
 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedNodeId, removeNode]);
+  }, [selectedNodeId, selectedEdgeId, removeNode, removeEdge]);
 }

@@ -10,7 +10,7 @@
  * metadata. Trial-run: fires a dry-run on the backend, surfaces the
  * node-by-node summary inline.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Canvas from '@/components/canvas/Canvas';
 import NodeConfigPanel from '@/components/canvas/NodeConfigPanel';
@@ -137,8 +137,15 @@ export default function StrategyEditorPage(): JSX.Element {
     }
   }, [strategy]);
 
-  // Keyboard shortcuts: Delete=remove node, Ctrl+S=save.
-  useCanvasHotkeys(onSave);
+  // Keyboard shortcuts: Delete=node/edge, Ctrl+S=save, Shift+1/F=fit view.
+  // Canvas hands back its fitView via onFitViewReady (it lives inside
+  // ReactFlowProvider; the page only holds a stable trampoline ref).
+  const fitViewRef = useRef<() => void>(() => {});
+  const onFitView = useCallback(() => fitViewRef.current(), []);
+  const onFitViewReady = useCallback((fit: () => void) => {
+    fitViewRef.current = fit;
+  }, []);
+  useCanvasHotkeys(onSave, onFitView);
 
   const onBack = useCallback(() => {
     navigate('/strategies');
@@ -171,7 +178,7 @@ export default function StrategyEditorPage(): JSX.Element {
       <div className="flex flex-1 overflow-hidden">
         <NodePalette onAdd={(type) => addNode(type, { x: 240, y: 200 })} />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Canvas />
+          <Canvas onFitViewReady={onFitViewReady} />
           {trialSummary && <TrialRunBanner summary={trialSummary} />}
         </div>
         <NodeConfigPanel />
