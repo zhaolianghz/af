@@ -532,3 +532,45 @@ describe('canvasStore — setSaveStatus / setValidation', () => {
     expect(useCanvasStore.getState().validationError).toBe('no data_source');
   });
 });
+
+describe('canvasStore — onEdgesChange dirty tracking', () => {
+  beforeEach(() => {
+    useCanvasStore.getState().reset();
+  });
+
+  it('marks the graph dirty on a remove change (EdgeView ✕ dispatch path)', () => {
+    const a = useCanvasStore.getState().addNode('filter', { x: 0, y: 0 });
+    const b = useCanvasStore.getState().addNode('rank', { x: 300, y: 0 });
+    useCanvasStore.getState().onConnect({ source: a, target: b, sourceHandle: null, targetHandle: null });
+    useCanvasStore.getState().setSaveStatus('saved'); // ✕ click happens post-save
+
+    const edgeId = useCanvasStore.getState().edges[0].id;
+    useCanvasStore.getState().onEdgesChange([{ type: 'remove', id: edgeId }]);
+
+    expect(useCanvasStore.getState().edges).toHaveLength(0);
+    expect(useCanvasStore.getState().saveStatus).toBe('dirty');
+  });
+
+  it('does NOT dirty on a pure selection change', () => {
+    const a = useCanvasStore.getState().addNode('filter', { x: 0, y: 0 });
+    const b = useCanvasStore.getState().addNode('rank', { x: 300, y: 0 });
+    useCanvasStore.getState().onConnect({ source: a, target: b, sourceHandle: null, targetHandle: null });
+    useCanvasStore.getState().setSaveStatus('saved');
+
+    const edgeId = useCanvasStore.getState().edges[0].id;
+    useCanvasStore.getState().onEdgesChange([{ type: 'select', id: edgeId, selected: true }]);
+
+    expect(useCanvasStore.getState().saveStatus).toBe('saved');
+  });
+
+  it('marks the graph dirty on a node position change (drag)', () => {
+    const a = useCanvasStore.getState().addNode('filter', { x: 0, y: 0 });
+    useCanvasStore.getState().setSaveStatus('saved');
+
+    useCanvasStore.getState().onNodesChange([
+      { id: a, type: 'position', position: { x: 50, y: 50 }, dragging: false },
+    ]);
+
+    expect(useCanvasStore.getState().saveStatus).toBe('dirty');
+  });
+});

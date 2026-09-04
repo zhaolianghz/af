@@ -198,14 +198,14 @@ describe('SettingsPage change-password card', () => {
     expect(notifySuccessMock).toHaveBeenCalled();
   });
 
-  it('fetches models and switches the model field to a dropdown', async () => {
+  it('fetches models and wires a datalist for autocomplete', async () => {
     getProvidersMock.mockResolvedValue(CHAIN);
     listProviderModelsMock.mockResolvedValue({
       models: ['deepseek-chat', 'deepseek-reasoner', 'text-embedding-3-small'],
     });
     render(<SettingsPage />);
     await waitFor(() => expect(screen.getByText('#1')).toBeInTheDocument());
-    // The first row's model is currently a free input.
+    // The first row's model is a free input.
     const modelInput = screen.getAllByPlaceholderText('deepseek-chat')[0];
     expect(modelInput).toBeInTheDocument();
     // Click "拉取模型列表" on row #1.
@@ -215,14 +215,16 @@ describe('SettingsPage change-password card', () => {
     await waitFor(() =>
       expect(notifySuccessMock).toHaveBeenCalledWith(expect.stringContaining('共 3 个模型')),
     );
-    // The model input became a select with the FULL list — embedding
-    // models stay selectable (the operator picks, no preset filter).
-    const modelSelect = screen.getAllByRole('combobox')[1]; // 0 = provider preset
-    expect(modelSelect).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'deepseek-chat' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'deepseek-reasoner' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'text-embedding-3-small' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '手动输入…' })).toBeInTheDocument();
+    // The model field is STILL a free input (no sentinel mode toggle),
+    // now backed by a datalist containing the FULL fetched list —
+    // embedding ids included (the operator picks, no preset filter).
+    expect(screen.getAllByPlaceholderText('deepseek-chat')[0]).toBeInTheDocument();
+    const datalist = document.querySelector('datalist');
+    expect(datalist).not.toBeNull();
+    const options = Array.from(datalist!.querySelectorAll('option')).map((o) => o.getAttribute('value'));
+    expect(options).toEqual(['deepseek-chat', 'deepseek-reasoner', 'text-embedding-3-small']);
+    // The input is associated with the datalist (autocomplete live).
+    expect(modelInput.getAttribute('list')).toBe(datalist!.id);
   });
 
   it('surfaces a fetch failure as an error toast and keeps the input', async () => {

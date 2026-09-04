@@ -357,30 +357,22 @@ function ProviderRow({
         </Field>
         {!isMock && (
           <Field label="模型">
-            {row.models && row.models.length > 0 ? (
-              <select
-                value={row.models.includes(row.model) ? row.model : '__manual__'}
-                onChange={(e) => {
-                  if (e.target.value === '__manual__') {
-                    onUpdate({ models: [] }); // switch back to free input
-                  } else {
-                    onUpdate({ model: e.target.value });
-                  }
-                }}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
-              >
+            {/* Free input + datalist autocomplete from the fetched
+                model list — no sentinel mode toggle, and the fetched
+                list survives switching to manual typing. */}
+            <input
+              value={row.model}
+              onChange={(e) => onUpdate({ model: e.target.value })}
+              placeholder="deepseek-chat"
+              list={row.models && row.models.length > 0 ? `models-${row.id ?? index}` : undefined}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+            />
+            {row.models && row.models.length > 0 && (
+              <datalist id={`models-${row.id ?? index}`}>
                 {row.models.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m} value={m} />
                 ))}
-                <option value="__manual__">手动输入…</option>
-              </select>
-            ) : (
-              <input
-                value={row.model}
-                onChange={(e) => onUpdate({ model: e.target.value })}
-                placeholder="deepseek-chat"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
-              />
+              </datalist>
             )}
           </Field>
         )}

@@ -2,6 +2,7 @@
 package auth
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -22,18 +23,24 @@ const (
 // downstream handlers + future per-role enforcement.
 //
 // Native EventSource cannot set an Authorization header (a long-standing
-// W3C gap), so SSE consumers fall back to an `access_token` query
-// parameter — the same escape hatch GitHub's API and Django Channels
-// use. Prefer the header whenever present; only read the query param
-// when the header is absent so a stolen-URL token never overrides a
-// real header credential.
+// W3C gap), so the ONE endpoint that must be consumed via EventSource —
+// the SSE run-events stream — accepts an `access_token` query parameter
+// as a fallback. The fallback is deliberately narrow:
+//
+//   - GET + the /runs/:id/events path only (sseRoute prefix check) —
+//     tokens riding in URLs leak to access logs, history and Referer,
+//     so no other route or method may authenticate this way;
+//   - header credentials always win — a stolen-URL token can never
+//     override a real header;
+//   - a non-Bearer Authorization header (e.g. a proxy-injected Basic
+//     credential) does not block the SSE fallback, it just isn't used.
 func (s *Service) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.GetHeader("Authorization")
 		token := ""
 		if strings.HasPrefix(h, "Bearer ") {
 			token = strings.TrimPrefix(h, "Bearer ")
-		} else if h == "" {
+		} else if sseRequest(c) {
 			token = c.Query("access_token")
 		}
 		if token == "" {
@@ -52,6 +59,20 @@ func (s *Service) Middleware() gin.HandlerFunc {
 		c.Set(ctxRole, claims.Role)
 		c.Next()
 	}
+}
+
+// sseRequest reports whether this request targets the run-events SSE
+// stream — the one route structurally required to authenticate without
+// an Authorization header. The events route is registered as
+// POST-free GET-only under /api/v1/runs/:id/events; the suffix+prefix
+// match works regardless of the configured api base path, and the
+// method is re-checked here for defense in depth.
+func sseRequest(c *gin.Context) bool {
+	if c.Request == nil || c.Request.Method != http.MethodGet {
+		return false
+	}
+	p := c.Request.URL.Path
+	return strings.HasSuffix(p, "/events") && strings.Contains(p, "/runs/")
 }
 
 // UserID returns the authenticated user id from the context (0 if none).

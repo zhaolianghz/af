@@ -125,11 +125,19 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   onNodesChange: (changes) =>
     set((s) => ({
       nodes: applyNodeChanges(changes, s.nodes) as RFNode[],
+      // Position/size/data changes mark the graph dirty; pure selection
+      // changes don't. External callers (EdgeView's setEdges dispatch)
+      // also land here, so this is where the delete-via-✕ dirty flag
+      // originates — removeEdge via the hotkey path sets it itself.
+      saveStatus:
+        changes.some((c) => c.type !== 'select') ? 'dirty' : s.saveStatus,
     })),
 
   onEdgesChange: (changes) =>
     set((s) => ({
       edges: applyEdgeChanges(changes, s.edges) as RFEdge[],
+      saveStatus:
+        changes.some((c) => c.type !== 'select') ? 'dirty' : s.saveStatus,
     })),
 
   onConnect: (conn) =>

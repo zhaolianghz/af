@@ -41,13 +41,13 @@ export function useCanvasHotkeys(onSave: () => void, onFitView?: () => void): vo
         return;
       }
 
-      // Shift+1 / Shift+F → fit view (ReactFlow's convention).
-      if ((e.key === '!' || e.key === '1') && e.shiftKey && !mod) {
-        e.preventDefault();
-        onFitViewRef.current?.();
-        return;
-      }
-      if (e.key === 'F' && e.shiftKey && !mod) {
+      // Shift+1 / Shift+F → fit view (ReactFlow's convention). '!'
+      // is what Shift+1 produces on US layouts; '1' with shiftKey
+      // covers layouts where the key still reports '1'. e.code
+      // (Digit1) would be layout-independent but jsdom's keyDown
+      // doesn't set code reliably — the three-way match is the
+      // pragmatic middle ground.
+      if (e.shiftKey && !mod && (e.key === '!' || e.key === '1' || e.key === 'F' || e.key === 'f')) {
         e.preventDefault();
         onFitViewRef.current?.();
         return;

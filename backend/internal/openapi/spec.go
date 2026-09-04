@@ -511,8 +511,8 @@ func buildPaths(p, page, pageSize *parameter, intID *schema,
 		Get: &operation{
 			Tags:        []string{"Runs"},
 			Summary:     "SSE event stream for a run (supports Last-Event-ID resume)",
-			Description: "Server-Sent Events stream. Wire format: `event: <name>\\nid: <unix-nano>\\ndata: <json>\\n\\n`. The `id` field is a Unix-nanosecond timestamp usable as the Last-Event-ID header on reconnect. The stream closes when the run reaches a terminal state (succeeded/failed/cancelled) or after 5 minutes of inactivity.",
-			Parameters:  []*parameter{p, pID("id"), {Name: "Last-Event-ID", In: "header", Schema: sStr("Resume from this Unix-nanosecond id", "")}},
+			Description: "Server-Sent Events stream. Wire format: `event: <name>\\nid: <unix-nano>\\ndata: <json>\\n\\n`. The `id` field is a Unix-nanosecond timestamp usable as the Last-Event-ID header on reconnect. The stream closes when the run reaches a terminal state (succeeded/failed/cancelled) or after 5 minutes of inactivity. Auth: prefers the Authorization header; native EventSource clients (which cannot set headers) may pass a JWT via the `access_token` query parameter — honored on this SSE route only.",
+			Parameters:  []*parameter{p, pID("id"), {Name: "Last-Event-ID", In: "header", Schema: sStr("Resume from this Unix-nanosecond id", "")}, pQ("access_token", sStr("JWT fallback for native EventSource, which cannot send the Authorization header. Only honored on this SSE route.", ""))},
 			Responses: map[string]*response{
 				"200": {Description: "SSE stream", Content: map[string]*mtRo{"text/event-stream": {Schema: sStr("event frames", "event: node.started\\nid: 1737033600000000000\\ndata: {\\\"node_key\\\":\\\"ma_filter\\\"}\\n\\n")}}},
 				"404": errRespCode(10002, "Run not found"),
